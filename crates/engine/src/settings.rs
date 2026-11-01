@@ -32,6 +32,11 @@ pub struct GhidraSettings {
     /// Memory for Ghidra in GB (4 to 31). More makes its first look at a big program faster.
     /// `None`: half this computer's memory.
     pub memory_gb: Option<u64>,
+    /// Look for Ghidra only in `install_dir` and the engine store, never on PATH or in system
+    /// folders. Never saved: set by sessions that must not find this computer's own Ghidra
+    /// ([`crate::Session::isolated`], the demo app), so what they do doesn't depend on the machine.
+    #[serde(skip)]
+    pub set_or_managed_only: bool,
 }
 
 /// One list for the per-engine path overrides: it declares the `ToolPaths` fields, `override_for`,
@@ -377,7 +382,12 @@ impl Settings {
 
     /// Ghidra's headless launcher, when Deep mode can really use Ghidra (`None`: not installed).
     pub fn ghidra_launcher(&self) -> Option<PathBuf> {
-        craft_anything_engines::ghidra::get::headless(self.engines.ghidra.install_dir.as_deref(), &self.engine_store_dir())
+        let g = &self.engines.ghidra;
+        let store = self.engine_store_dir();
+        if g.set_or_managed_only {
+            return craft_anything_engines::ghidra::get::headless_set_or_managed(g.install_dir.as_deref(), &store);
+        }
+        craft_anything_engines::ghidra::get::headless(g.install_dir.as_deref(), &store)
     }
 
     /// The Java runtime Ghidra runs on (`None`: let Ghidra find its own).
@@ -416,6 +426,22 @@ auto_mode = true
     }
 
     use super::*;
+
+    #[test]
+    fn an_isolated_session_finds_only_the_ghidra_in_its_own_store() {
+        // UI tests failed on a Mac with Ghidra from Homebrew: the "get Ghidra" offer never came.
+        let d = tempfile::tempdir().unwrap();
+        let s = crate::Session::isolated(d.path()).settings;
+        assert!(s.engines.ghidra.set_or_managed_only);
+        assert_eq!(s.ghidra_launcher(), None, "not this computer's own Ghidra");
+        let support = s.engine_store_dir().join("ghidra/ghidra_1/support");
+        std::fs::create_dir_all(&support).unwrap();
+        let name = if cfg!(windows) { "analyzeHeadless.bat" } else { "analyzeHeadless" };
+        std::fs::write(support.join(name), "").unwrap();
+        assert_eq!(s.ghidra_launcher(), Some(support.join(name)), "the managed one is found");
+        let saved = toml::to_string(&s).unwrap();
+        assert!(!saved.contains("set_or_managed_only"), "never saved");
+    }
 
     #[test]
     fn path_overrides_match_the_engine_table_exactly() {

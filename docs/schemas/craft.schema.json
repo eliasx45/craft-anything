@@ -53,6 +53,10 @@
       "format": "uint64",
       "minimum": 0
     },
+    "decompiled": {
+      "description": "The builder has decompiled the original for this project (Deep mode), in this run or an\nearlier one, so a later message isn't sent back to decompile before it's answered.\nProjects from before this was recorded read as false; the run then looks at the\ninvestigation's evidence instead.",
+      "type": "boolean"
+    },
     "generate_assets": {
       "description": "The person lets the builder generate pictures and 3D models (paid, so off until they turn\nit on; it also needs a key for an asset provider).",
       "type": "boolean",

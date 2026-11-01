@@ -288,7 +288,6 @@ fn notes_added_while_it_works_reach_the_agent_at_its_next_step() {
         notes: notes.clone(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     };
@@ -573,7 +572,6 @@ fn an_api_backend_builds_with_the_build_tools() {
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     };
@@ -689,7 +687,6 @@ fn the_mechanics_sheet_is_required_and_held_against_the_code() {
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     };
@@ -841,11 +838,15 @@ mod picking_up_a_build {
     }
 
     fn try_it(b: &Bench, ws: &Workspace) -> (bool, Vec<feed::FeedItem>) {
+        run_with(b, ws, None)
+    }
+
+    /// A run, with the person's `message` when there is one.
+    fn run_with(b: &Bench, ws: &Workspace, message: Option<&str>) -> (bool, Vec<feed::FeedItem>) {
         let mut kinds = KindRegistry::built_in();
         kinds.register(Arc::new(FlakyKind));
-        let run =
-            RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), RunOptions { kinds, backend: Some("Stand-in".into()), ..RunOptions::default() })
-                .unwrap();
+        let opts = RunOptions { kinds, backend: Some("Stand-in".into()), message: message.map(str::to_string), ..RunOptions::default() };
+        let run = RebuildRun::start(&b.hub, Workspace::open(&ws.root).unwrap(), opts).unwrap();
         let began = Instant::now();
         let mut ok = None;
         while ok.is_none() {
@@ -905,6 +906,78 @@ mod picking_up_a_build {
         assert!(!told.contains("Their request"), "not the first-build brief again: {told}");
     }
 
+    fn steps(feed: &[feed::FeedItem]) -> Vec<&str> {
+        feed.iter().filter_map(|i| if let feed::FeedItem::Step { text, .. } = i { Some(text.as_str()) } else { None }).collect()
+    }
+
+    /// A program on this computer, so Deep mode (the test session's mode) requires decompiling it.
+    fn a_program(b: &Bench) -> TargetRef {
+        let path = b.projects.join("tool.bin");
+        std::fs::write(&path, b"not much of a program").unwrap();
+        TargetRef::Local { path }
+    }
+
+    #[test]
+    fn a_first_deep_build_that_decompiled_nothing_is_told_to() {
+        let b = bench();
+        let ws = Workspace::create(&b.projects, "x", "A thing", a_program(&b)).unwrap();
+        let (ok, feed) = try_it(&b, &ws);
+        assert!(ok, "{feed:?}");
+        let told = std::fs::read_to_string(&b.prompts).unwrap();
+        assert_eq!(prompts_given(&b), 2, "{told}");
+        assert!(told.contains(DECOMPILE_FIRST), "{told}");
+        assert!(!Workspace::open(&ws.root).unwrap().manifest.decompiled);
+    }
+
+    #[test]
+    fn a_message_to_a_project_decompiled_before_is_answered_without_decompiling_again() {
+        // A question after the build ("which path do I add?") was sent back to decompile, and a
+        // whole build turn more, because "has decompiled" was only known for the run.
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.target = a_program(&b);
+        ws.manifest.decompiled = true;
+        ws.save().unwrap();
+        let (ok, feed) = run_with(&b, &ws, Some("Which path do I add to Accessibility?"));
+        assert!(ok, "{feed:?}");
+        let told = std::fs::read_to_string(&b.prompts).unwrap();
+        assert_eq!(prompts_given(&b), 1, "{told}");
+        assert!(told.contains("Which path do I add to Accessibility?") && !told.contains(DECOMPILE_FIRST), "{told}");
+        let steps = steps(&feed);
+        assert!(steps.contains(&WORKING_ON_MESSAGE) && !steps.contains(&"Improving the build…"), "the turn is about their message: {steps:?}");
+    }
+
+    #[test]
+    fn a_project_from_before_the_flag_counts_as_decompiled_by_its_evidence() {
+        use craft_anything_evidence::{Environment, EvidenceBuilder, Subject};
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.target = a_program(&b);
+        ws.save().unwrap();
+        let project = Project::create(&ws.investigation_dir(), "x", Purpose::default()).unwrap();
+        let ev = EvidenceBuilder::new(craft_anything_engine::tools::native_function::PSEUDOCODE_TOOL, Subject::default(), Environment::builtin(true))
+            .result(json!({"pseudocode": "int f() { return 1; }"}))
+            .build()
+            .unwrap();
+        project.store_evidence(&ev).unwrap();
+        let (ok, feed) = run_with(&b, &ws, Some("Make the window bigger."));
+        assert!(ok, "{feed:?}");
+        assert_eq!(prompts_given(&b), 1, "not reminded");
+        assert!(Workspace::open(&ws.root).unwrap().manifest.decompiled, "and it's on record now");
+    }
+
+    #[test]
+    fn a_message_to_a_project_never_decompiled_is_still_reminded() {
+        let b = bench();
+        let mut ws = worked_on(&b);
+        ws.manifest.target = a_program(&b);
+        ws.save().unwrap();
+        let (ok, feed) = run_with(&b, &ws, Some("Make the window bigger."));
+        assert!(ok, "{feed:?}");
+        assert_eq!(prompts_given(&b), 2);
+        assert!(std::fs::read_to_string(&b.prompts).unwrap().contains(DECOMPILE_FIRST));
+    }
+
     #[test]
     fn a_new_project_still_starts_from_the_top() {
         let b = bench();
@@ -961,7 +1034,6 @@ fn check_worker(ws: &Workspace, deep: bool) -> Worker {
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     }
@@ -1347,7 +1419,6 @@ fn preparing_the_builders_agent_does_not_lock_up() {
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     };
@@ -1387,7 +1458,6 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
         notes: Arc::default(),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: Some((Arc::new(SheetKind), 90.0)),
     };
@@ -1580,7 +1650,6 @@ fn a_note_the_builder_took_at_a_step_joins_the_feed_and_isnt_sent_again() {
         ])),
         feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
         assets: false,
-        decompiled: false,
         usage: None,
         self_check: None,
     };

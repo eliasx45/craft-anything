@@ -63,6 +63,9 @@ before running anything, and run new tests on a machine without the program.
 It happened again when Clean room began refusing tools before their program is looked for: a
 "missing adb" test returned early on a machine with adb and failed in CI without it. A test of
 what happens without a program builds its session in the mode the tool runs in.
+And again with Ghidra from Homebrew: the UI tests' "get Ghidra" offer never came on a Mac that had
+it, because the lookup also searched PATH and the usual folders. Isolated sessions and the demo app
+look for Ghidra only in their own store (`set_or_managed_only`).
 
 **A failing crate hid the next crate's tests.** `cargo test -p a -p b` stopped after a failure in
 `a`, so `b`'s tests never ran; the rerun was filtered to the failing test, and a broken engine id
@@ -338,6 +341,13 @@ flag was read as a first build, and Try again starts exactly that run. A browser
 the final check failed a finished build; Try again then studied the original again and gave the
 builder the first brief. A run decides what's left from what the project records, not from which
 button started it, and a check that couldn't look says nothing about the build.
+
+**A per-run flag for a per-project fact.** "Has the builder decompiled?" was a field of the run,
+so every follow-up run started at "no": a plain question after a Deep build ("which path do I add
+to Accessibility?") got the "decompile first" reminder and a whole extra decompile-and-edit turn
+(about $8 more on a real project). A fact about the project lives in what the project records
+(craft.json, its evidence), not in the run that happened to find it out; test it with a second
+run on the same project.
 
 **A filter written for one kind of text, run on another.** The stand-in's secret scan was written for
 API answers, then also ran on recorded scripts: `this.token=t` became `[dropped]` and the scripts

@@ -239,7 +239,6 @@ impl RebuildRun {
             notes: notes.clone(),
             feed: feed.clone(),
             assets: hub.has_asset_keys(),
-            decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
         };
@@ -412,8 +411,6 @@ struct Worker {
     /// An asset provider's key is set up, so the builder can generate pictures and 3D models if the
     /// project allows it.
     assets: bool,
-    /// The builder has decompiled something this run (Deep mode requires it).
-    decompiled: bool,
     /// Where this run adds its working time, tokens and cost (`None` in tests that don't build).
     usage: Option<UsageClock>,
     /// The kind and bar the builder's own checks (`rebuild_check`) are judged by, once known.
@@ -645,16 +642,20 @@ impl Worker {
         }
         let mut round = ws.manifest.checks.iter().map(|c| c.round).max().unwrap_or(0);
         let mut refinements = 0;
-        // Deep mode on a program: decompiling is required, so a build turn without any gets one reminder.
+        // Deep mode on a program: decompiling is required, so a build turn without any gets one
+        // reminder, unless the project was decompiled before (a later message asking a question).
         let must_decompile = !self.engine.session().clean_room() && matches!(ws.manifest.target, TargetRef::Local { .. });
         let mut reminded = false;
+        // This run's first turn carries the person's message (a follow-up), not a first build.
+        let mut on_message = opts.message.is_some() && !first;
         // The builder finished and only the check didn't: the build is there to check.
         let mut only_check = carrying_on && !first && opts.message.is_none() && ws.manifest.awaiting_check;
         loop {
             if !std::mem::take(&mut only_check) {
-                let doing = match (round, carrying_on) {
-                    (0, false) => "Building the first version…",
-                    (0, true) => "Carrying on with the build…",
+                let doing = match (std::mem::take(&mut on_message), round, carrying_on) {
+                    (true, ..) => WORKING_ON_MESSAGE,
+                    (false, 0, false) => "Building the first version…",
+                    (false, 0, true) => "Carrying on with the build…",
                     _ => "Improving the build…",
                 };
                 self.step(ws, Step::Build, Status::Building, doing)?;
@@ -676,9 +677,10 @@ impl Worker {
                 // What the person added while the agent worked goes in before anything else.
                 if let Some(p) = self.added(ws) {
                     prompt = p;
+                    on_message = true;
                     continue;
                 }
-                if must_decompile && !self.decompiled && !reminded {
+                if must_decompile && !reminded && !decompiled_before(ws)? {
                     reminded = true;
                     prompt = DECOMPILE_FIRST.to_string();
                     continue;
@@ -696,6 +698,7 @@ impl Worker {
             let not_good = checks.iter().find(|c| !c.good(opts.good_enough));
             if let Some(p) = self.added(ws) {
                 prompt = p;
+                on_message = true;
                 continue;
             }
             let Some(check) = not_good else { break };
@@ -827,7 +830,7 @@ impl Worker {
                     AgentEvent::ToolStarted { tool, .. }
                         if self.engine.registry().canonical(tool) == Some(craft_anything_engine::tools::native_function::PSEUDOCODE_TOOL) =>
                     {
-                        self.decompiled = true
+                        ws.manifest.decompiled = true
                     }
                     AgentEvent::Error { message, remediation, .. } => failed = Some((message.clone(), remediation.clone())),
                     _ => {}
@@ -880,6 +883,30 @@ impl Worker {
             }
         }
     }
+}
+
+/// The step shown while the builder works on what the person just said.
+pub(super) const WORKING_ON_MESSAGE: &str = "Working on your message…";
+
+/// The largest evidence record [`decompiled_before`] reads.
+const MAX_EVIDENCE_READ: u64 = 8 << 20;
+
+/// The project has been decompiled: in this run or an earlier one (`decompiled` in craft.json),
+/// or, for a project from before that was recorded, a decompiled function in its investigation
+/// (which is then recorded, so it's looked for once).
+fn decompiled_before(ws: &mut Workspace) -> Result<bool, ToolError> {
+    if ws.manifest.decompiled {
+        return Ok(true);
+    }
+    let Ok(project) = Project::open(&ws.investigation_dir()) else { return Ok(false) };
+    let pseudocode = craft_anything_engine::tools::native_function::PSEUDOCODE_TOOL;
+    let found =
+        project.evidence_files().iter().filter(|f| f.bytes <= MAX_EVIDENCE_READ).any(|f| project.load_evidence(&f.id).is_ok_and(|e| e.operation == pseudocode));
+    if found {
+        ws.manifest.decompiled = true;
+        ws.save()?;
+    }
+    Ok(found)
 }
 
 /// What an API-backend builder is told first: its tools differ from an agent app's.

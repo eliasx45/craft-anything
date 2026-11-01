@@ -101,6 +101,8 @@ impl Session {
     pub fn isolated(dir: &std::path::Path) -> Self {
         let mut settings = Settings::default();
         settings.engines.store_dir = Some(dir.join("engines"));
+        // Not this computer's own Ghidra either (Homebrew, PATH): only the store under `dir`.
+        settings.engines.ghidra.set_or_managed_only = true;
         settings.projects_dir = Some(dir.join("projects"));
         Session { settings, config_dir: Some(dir.to_path_buf()), ..Default::default() }
     }

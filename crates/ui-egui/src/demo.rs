@@ -100,7 +100,9 @@ fn strings_evidence() -> Option<Evidence> {
 
 /// An engine with the sample program open and a few findings in the ledger.
 pub fn engine(mode: Mode, first_run_done: bool) -> Arc<Engine> {
-    let settings = Settings { mode, first_run_done, language: "en".into(), ..Default::default() };
+    let mut settings = Settings { mode, first_run_done, language: "en".into(), ..Default::default() };
+    // Ghidra is what the demo's own settings say, never one installed on this computer.
+    settings.engines.ghidra.set_or_managed_only = true;
     let mut session = Session::new(settings);
     session.add_target(sample_target());
     for e in [strings_evidence(), functions_evidence(), percent_evidence()].into_iter().flatten() {
@@ -238,6 +240,7 @@ fn workspace(slug: &str, name: &str, request: &str, target: TargetRef, status: S
             builder: None,
             questions: None,
             awaiting_check: false,
+            decompiled: false,
         },
     }
 }

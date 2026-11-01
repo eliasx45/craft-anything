@@ -395,6 +395,12 @@ pub struct Manifest {
     /// that picks this up only needs to check: nothing is left to build.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub awaiting_check: bool,
+    /// The builder has decompiled the original for this project (Deep mode), in this run or an
+    /// earlier one, so a later message isn't sent back to decompile before it's answered.
+    /// Projects from before this was recorded read as false; the run then looks at the
+    /// investigation's evidence instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub decompiled: bool,
 }
 
 impl Manifest {
@@ -421,6 +427,7 @@ impl Manifest {
             builder: None,
             questions: None,
             awaiting_check: false,
+            decompiled: false,
         }
     }
 
@@ -1322,6 +1329,7 @@ mod tests {
         let ws = Workspace::create(d.path(), "New", "x", TargetRef::None).unwrap();
         let saved: Value = serde_json::from_slice(&std::fs::read(ws.root.join(MANIFEST)).unwrap()).unwrap();
         assert!(saved.get("app_in_root").is_none() && saved.get("start_files").is_none(), "a usual project's craft.json is unchanged");
+        assert!(saved.get("decompiled").is_none() && !m.decompiled, "nor is one never decompiled");
     }
 
     #[test]
