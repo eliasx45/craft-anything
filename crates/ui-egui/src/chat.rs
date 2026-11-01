@@ -7,7 +7,7 @@ use crate::theme::{self, Tokens};
 use crate::{CraftApp, evidence_ui, glossary, icons, widgets};
 use craft_anything_ai::AgentEvent;
 use craft_anything_engine::TargetKind;
-use egui::{Margin, RichText, Ui, Vec2};
+use egui::{Color32, Margin, RichText, Stroke, Ui, Vec2};
 use serde_json::Value;
 
 /// Fold one agent event into the conversation.
@@ -137,9 +137,13 @@ pub fn ask_screen(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let side_w = 300.0_f32.min(ui.available_width() * 0.3);
     // What's open sits on the right; the app's sidebar is on the left.
-    egui::Panel::right("ask-side").exact_size(side_w).resizable(false).frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin::same(20))).show(ui, |ui| {
-        target_card(app, ui);
-    });
+    egui::Panel::right("ask-side")
+        .exact_size(side_w)
+        .resizable(false)
+        .frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: 8, right: 16, top: 16, bottom: 16 }))
+        .show(ui, |ui| {
+            target_card(app, ui);
+        });
     egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(PANE_MARGIN)).show(ui, |ui| {
         conversation(app, ui, false);
     });
@@ -147,14 +151,14 @@ pub fn ask_screen(app: &mut CraftApp, ui: &mut Ui) {
 
 fn target_card(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    widgets::card(&t).show(ui, |ui| {
+    side_card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         match app.view.active_target().cloned() {
             Some(target) => {
                 ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, t.radius, t.accent_soft);
-                    icons::paint(ui, rect, crate::kind_icon(target.kind), 26.0, t.accent_ink);
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
+                    ui.painter().circle_filled(rect.center(), 22.0, t.secondary_fill);
+                    icons::paint(ui, rect, crate::kind_icon(target.kind), 22.0, t.text);
                     ui.vertical(|ui| {
                         ui.add(egui::Label::new(theme::heading(&target.name, theme::CARD)).truncate());
                         ui.label(RichText::new(crate::human_bytes(target.bytes.len())).color(t.text_faint).size(theme::CAPTION));
@@ -183,8 +187,8 @@ fn target_card(app: &mut CraftApp, ui: &mut Ui) {
             }
         }
     });
-    ui.add_space(14.0);
-    widgets::card(&t).show(ui, |ui| {
+    ui.add_space(10.0);
+    side_card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::caption(ui, "Try asking");
         ui.add_space(4.0);
@@ -209,17 +213,24 @@ fn target_card(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
-/// The chat panes' margins: a little more air under the prompt box than at the top.
-pub const PANE_MARGIN: Margin = Margin { left: 12, right: 20, top: 12, bottom: 24 };
+/// A details panel's card: a rounded fill a step above the page, no edge.
+pub(crate) fn side_card(t: &Tokens) -> egui::Frame {
+    egui::Frame::new().fill(t.card).corner_radius(t.r_lg()).inner_margin(Margin::same(16))
+}
+
+/// The chat panes' margins: the floating prompt box sits 14 above the bottom edge.
+pub const PANE_MARGIN: Margin = Margin { left: 14, right: 14, top: 10, bottom: 14 };
 /// Between the last message and the prompt box.
-pub const COMPOSER_GAP: f32 = 16.0;
+pub const COMPOSER_GAP: f32 = 8.0;
 /// Between messages (on top of the item spacing).
 pub const MESSAGE_GAP: f32 = 6.0;
+/// How far the history runs under a fade above the prompt box.
+pub const BOTTOM_FADE: f32 = 20.0;
 
 /// The conversation with its composer. `dense` = Experienced agent console.
 pub fn conversation(app: &mut CraftApp, ui: &mut Ui, dense: bool) {
     let width = ui.available_width();
-    let max_w = if dense { width } else { width.min(720.0) };
+    let max_w = if dense { width } else { width.min(COLUMN_W) };
     let pad = ((width - max_w) / 2.0).max(0.0);
     // The history gets exactly what the composer leaves (its height is measured last frame), so
     // a panel never grows to fit us.
@@ -229,15 +240,22 @@ pub fn conversation(app: &mut CraftApp, ui: &mut Ui, dense: bool) {
     // space given makes the agent console's panel grow by that much every frame, until it reaches
     // its maximum and the top of its tab strip is cut off.
     let rest = Vec2::new(width, (ui.available_height() - comp_h - COMPOSER_GAP - ui.spacing().item_spacing.y).max(40.0));
-    ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+    let area = ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
         ui.set_min_height(rest.y);
         history(app, ui, dense, pad, max_w)
     });
+    // The history melts into the page just above the box.
+    if !dense {
+        let r = area.response.rect;
+        let t = Tokens::get(ui.ctx());
+        fade(ui.painter(), egui::Rect::from_x_y_ranges(r.x_range(), (r.bottom() - BOTTOM_FADE)..=r.bottom()), t.canvas, false, 0.0);
+    }
     ui.add_space(COMPOSER_GAP);
     // Top-aligned: `horizontal` centres in its row, which put the box 12 points below the gap.
     let r = ui.horizontal_top(|ui| {
         ui.add_space(pad);
-        composer(app, ui, max_w, dense);
+        // Stacked, so the row measures the box and the line under it.
+        ui.vertical(|ui| composer(app, ui, max_w, dense));
     });
     remember_composer_height(ui, comp_id, comp_h, r.response.rect.height());
 }
@@ -264,10 +282,36 @@ fn history(app: &mut CraftApp, ui: &mut Ui, dense: bool, pad: f32, max_w: f32) {
                 let mut actions = Vec::new();
                 let beginner = app.beginner();
                 let last_proof = app.state.chat.iter().rposition(|i| matches!(i, ChatItem::Proof { .. }));
+                // The gaps between messages are set here (closer within a speaker's run); what's
+                // inside each one keeps the usual spacing.
+                let spacing = ui.spacing().item_spacing;
+                ui.spacing_mut().item_spacing.y = 0.0;
+                if !dense {
+                    ui.add_space(8.0);
+                }
+                let mut last = None;
                 for (i, item) in app.state.chat.iter().enumerate() {
                     let open = !dense && Some(i) == last_proof;
-                    ui.push_id(i, |ui| item_ui(ui, item, beginner, dense, open, &mut actions));
-                    ui.add_space(if dense { 4.0 } else { MESSAGE_GAP });
+                    let side = speaker(item);
+                    if i > 0 {
+                        ui.add_space(if dense {
+                            spacing.y
+                        } else if last == Some(side) && side != Speaker::Card {
+                            SAME_SPEAKER_GAP
+                        } else {
+                            NEW_SPEAKER_GAP
+                        });
+                    }
+                    last = Some(side);
+                    ui.push_id(i, |ui| {
+                        ui.spacing_mut().item_spacing = spacing;
+                        item_ui(ui, item, beginner, dense, open, &mut actions)
+                    });
+                }
+                ui.add_space(if dense { 4.0 } else { NEW_SPEAKER_GAP });
+                ui.spacing_mut().item_spacing = spacing;
+                if !dense {
+                    ui.add_space(BOTTOM_FADE / 2.0);
                 }
                 // Only for this conversation: a build or a download elsewhere isn't an answer.
                 if app.answering() && !matches!(app.state.chat.last(), Some(ChatItem::Assistant { streaming: true, .. })) {
@@ -348,41 +392,27 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, dense: bool) {
     });
 }
 
+/// Who an item comes from, for the gaps between them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Speaker {
+    Person,
+    App,
+    /// Questions, errors and offers: always set apart.
+    Card,
+}
+
+fn speaker(item: &ChatItem) -> Speaker {
+    match item {
+        ChatItem::User(_) => Speaker::Person,
+        ChatItem::Assistant { .. } | ChatItem::Status(_) | ChatItem::Tool { .. } | ChatItem::Proof { .. } => Speaker::App,
+        ChatItem::Consent { .. } | ChatItem::Error { .. } | ChatItem::AddBrain => Speaker::Card,
+    }
+}
+
 enum ChatAction {
     Consent(String, ConsentAnswer),
     AddBrain,
     OpenLog(std::path::PathBuf),
-}
-
-pub(crate) fn bubble(t: &Tokens, user: bool, dense: bool) -> egui::Frame {
-    let fill = if user { t.accent_soft } else { t.card };
-    let stroke = if user { egui::Stroke::NONE } else { egui::Stroke::new(1.0, t.card_border) };
-    let m = if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(16, 12) };
-    egui::Frame::new().fill(fill).stroke(stroke).corner_radius(t.r_lg()).inner_margin(m)
-}
-
-/// The person's message on the right. Labels in a right-to-left row don't wrap by themselves,
-/// so a long prompt would run off the side: wrap it inside the bubble.
-pub(crate) fn user_bubble(ui: &mut Ui, text: &str, dense: bool) {
-    let t = Tokens::get(ui.ctx());
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-        bubble(&t, true, dense).show(ui, |ui| {
-            ui.set_max_width(ui.available_width().min(560.0));
-            // The bubble sits on the right; its lines still read from the left.
-            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.add(egui::Label::new(RichText::new(text).color(t.text)).wrap());
-            });
-        });
-    });
-}
-
-/// A one-line activity row (icon and text) that wraps instead of running off the side.
-pub(crate) fn activity_row(ui: &mut Ui, text: RichText) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal_top(|ui| {
-        icons::show(ui, "activity", 14.0, t.accent);
-        ui.add(egui::Label::new(text).wrap());
-    });
 }
 
 fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool, actions: &mut Vec<ChatAction>) {
@@ -390,8 +420,7 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
     match item {
         ChatItem::User(text) => user_bubble(ui, text, dense),
         ChatItem::Assistant { text, backend, streaming } => {
-            bubble(&t, false, dense).show(ui, |ui| {
-                ui.set_width(ui.available_width());
+            agent_bubble(ui, dense, |ui| {
                 rich_text(ui, text, beginner && !dense);
                 if *streaming {
                     widgets::thinking(ui);
@@ -403,7 +432,7 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
             });
         }
         ChatItem::Status(text) => {
-            activity_row(ui, RichText::new(text).italics().color(t.text_dim).size(theme::CAPTION));
+            activity_row(ui, "activity", RichText::new(text).color(t.text_dim).size(theme::SMALL));
         }
         ChatItem::Tool { tool, ok, summary, evidence, .. } => {
             ui.horizontal_wrapped(|ui| {
@@ -412,7 +441,7 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
                     Some(true) => ("check", t.success),
                     Some(false) => ("triangle-alert", t.danger),
                 };
-                egui::Frame::new().fill(t.raised).corner_radius(t.r_sm()).inner_margin(Margin::symmetric(10, 3)).show(ui, |ui| {
+                egui::Frame::new().fill(t.bubble_agent).corner_radius(t.r_pill()).inner_margin(Margin::symmetric(10, 3)).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         icons::show(ui, icon, 13.0, col);
                         ui.label(RichText::new(tool.replace('_', " ")).font(theme::mono(12.5)).color(t.text_dim));
@@ -435,12 +464,9 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
             evidence_ui::proof_card(ui, evidence, dense, open);
         }
         ChatItem::Consent { call_id, title, explanation, answer, .. } => {
-            egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.5, t.warning)).corner_radius(t.r_lg()).inner_margin(Margin::same(14)).show(ui, |ui| {
+            notice(&t, None).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    icons::show(ui, "shield", 18.0, t.warning);
-                    ui.label(RichText::new(crate::i18n::trf("May I run \"{title}\"?", &[("title", title)])).font(theme::semibold(theme::BODY)));
-                });
+                notice_title(ui, "shield", t.warning, crate::i18n::trf("May I run \"{title}\"?", &[("title", title)]));
                 ui.label(RichText::new(explanation).color(t.text_dim));
                 ui.label(
                     RichText::new(tr("This runs code from the target or changes a device. Nothing runs until you say so."))
@@ -474,32 +500,24 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
             });
         }
         ChatItem::Error { message, remediation, log } => {
-            egui::Frame::new()
-                .fill(t.card)
-                .stroke(egui::Stroke::new(1.0, t.danger.gamma_multiply(0.6)))
-                .corner_radius(t.r_lg())
-                .inner_margin(Margin::same(12))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        icons::show(ui, "triangle-alert", 16.0, t.danger);
-                        ui.add(egui::Label::new(RichText::new(message).color(t.text)).wrap());
-                    });
-                    if let Some(r) = remediation {
-                        ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
-                    }
-                    if let Some(l) = log
-                        && widgets::open_log_button(ui, l)
-                    {
-                        actions.push(ChatAction::OpenLog(l.clone()));
-                    }
-                });
+            notice(&t, Some(t.danger)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                notice_title(ui, "triangle-alert", t.danger, message.clone());
+                if let Some(r) = remediation {
+                    ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
+                }
+                if let Some(l) = log
+                    && widgets::open_log_button(ui, l)
+                {
+                    actions.push(ChatAction::OpenLog(l.clone()));
+                }
+            });
         }
         ChatItem::AddBrain => {
-            egui::Frame::new().fill(t.accent_soft).corner_radius(t.r_lg()).inner_margin(Margin::same(14)).show(ui, |ui| {
+            notice(&t, None).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    icons::show(ui, "sparkles", 20.0, t.accent_ink);
+                    icons::show(ui, "sparkles", 18.0, t.text_dim);
                     ui.vertical(|ui| {
                         ui.label(RichText::new(tr("Want answers in plain words?")).font(theme::semibold(theme::BODY)));
                         ui.label(
@@ -515,6 +533,281 @@ fn item_ui(ui: &mut Ui, item: &ChatItem, beginner: bool, dense: bool, open: bool
             });
         }
     }
+}
+
+// ---- the chat look ------------------------------------------------------------------------------
+// Shared by the Ask screen, the agent console and the Project screen's feed.
+
+/// The conversation column's widest, centred in its pane.
+pub const COLUMN_W: f32 = 820.0;
+/// Between two messages from the same side, and where the speaker changes or a card comes.
+pub const SAME_SPEAKER_GAP: f32 = 4.0;
+pub const NEW_SPEAKER_GAP: f32 = 12.0;
+
+/// A message bubble: the person's in the stronger grey, the app's and the builder's a step
+/// quieter. Rounded, no edge, no tail.
+pub(crate) fn bubble(t: &Tokens, user: bool, dense: bool) -> egui::Frame {
+    let fill = if user { t.bubble_user } else { t.bubble_agent };
+    let m = if dense { Margin::symmetric(10, 6) } else { Margin::symmetric(12, 8) };
+    egui::Frame::new().fill(fill).corner_radius(t.r_lg()).inner_margin(m)
+}
+
+/// How wide a bubble may grow: most of the column, leaving the other side clear.
+fn bubble_max(ui: &Ui, dense: bool) -> f32 {
+    let w = ui.available_width();
+    if dense { w } else { (w * 0.8).max(120.0).min(w) }
+}
+
+/// The person's message on the right. Labels in a right-to-left row don't wrap by themselves,
+/// so a long prompt would run off the side: wrap it inside the bubble.
+pub(crate) fn user_bubble(ui: &mut Ui, text: &str, dense: bool) {
+    let t = Tokens::get(ui.ctx());
+    let max = bubble_max(ui, dense).min(USER_BUBBLE_TEXT_W);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+        // Laid out first, so the bubble is exactly as wide as its longest line.
+        let galley =
+            egui::WidgetText::from(RichText::new(text).color(t.text)).into_galley(ui, Some(egui::TextWrapMode::Wrap), max, egui::FontSelection::Default);
+        bubble(&t, true, dense).show(ui, |ui| {
+            ui.set_max_width(galley.size().x.ceil());
+            // The bubble sits on the right; its lines still read from the left.
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.add(egui::Label::new(galley));
+            });
+        });
+    });
+}
+
+/// The widest a line of the person's message runs.
+const USER_BUBBLE_TEXT_W: f32 = 560.0;
+
+/// The app's (or the builder's) message on the left, as wide as its text up to most of the column.
+pub(crate) fn agent_bubble<R>(ui: &mut Ui, dense: bool, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let t = Tokens::get(ui.ctx());
+    let max = bubble_max(ui, dense);
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        bubble(&t, false, dense)
+            .show(ui, |ui| {
+                ui.set_max_width(max - 24.0);
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), add).inner
+            })
+            .inner
+    })
+    .inner
+}
+
+/// A quiet line about what's happening ("Looking inside it…"): a small faint glyph and dim
+/// words, no box. It wraps instead of running off the side.
+pub(crate) fn activity_row(ui: &mut Ui, icon: &str, text: RichText) {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.add_space(6.0);
+        let line = ui.text_style_height(&egui::TextStyle::Body).max(14.0);
+        let (r, _) = ui.allocate_exact_size(Vec2::new(12.0, line), egui::Sense::hover());
+        icons::paint(ui, r, icon, 12.0, t.text_faint);
+        ui.add(egui::Label::new(text).wrap());
+    });
+}
+
+/// A centred, faint line between messages ("Started 12 minutes ago"). No rules.
+pub(crate) fn timestamp(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(10.0);
+    ui.vertical_centered(|ui| ui.label(RichText::new(text).color(t.text_faint).size(theme::CAPTION)));
+    ui.add_space(4.0);
+}
+
+/// A card in the conversation (a question, a check, a result): a rounded fill a step above the
+/// page, no edge. `tone` tints it (danger for a failure).
+pub(crate) fn notice(t: &Tokens, tone: Option<Color32>) -> egui::Frame {
+    let base = if t.dark() { t.raised } else { t.card };
+    let fill = tone.map_or(base, |c| theme::mix(base, c, 0.12));
+    egui::Frame::new().fill(fill).corner_radius(t.r_lg()).inner_margin(Margin::same(14))
+}
+
+/// A notice's first line: a small tinted glyph and the title.
+pub(crate) fn notice_title(ui: &mut Ui, icon: &str, tint: Color32, title: impl Into<String>) {
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let h = ui.text_style_height(&egui::TextStyle::Body).max(16.0);
+        let (r, _) = ui.allocate_exact_size(Vec2::new(16.0, h), egui::Sense::hover());
+        icons::paint(ui, r, icon, 15.0, tint);
+        ui.add(egui::Label::new(RichText::new(title).font(theme::semibold(theme::BODY))).wrap());
+    });
+}
+
+/// A two-or-more way switch: a pill track with the chosen option as a lighter pill on it.
+/// Returns the newly picked index when it changes. Options are named for screen readers.
+pub(crate) fn pill_switch(ui: &mut Ui, options: &[&str], selected: usize) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::medium(theme::CAPTION);
+    let galleys: Vec<_> = options.iter().map(|o| ui.painter().layout_no_wrap(tr(o), font.clone(), t.text)).collect();
+    let (pad, gap, inner_h) = (3.0, 2.0, 24.0);
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 24.0).collect();
+    let total = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32 + pad * 2.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(total, inner_h + pad * 2.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, t.r_pill(), t.secondary_fill);
+    let mut x = rect.left() + pad;
+    let mut picked = None;
+    for (i, (g, w)) in galleys.into_iter().zip(widths).enumerate() {
+        let seg = egui::Rect::from_min_size(egui::pos2(x, rect.top() + pad), Vec2::new(w, inner_h));
+        let label = options.get(i).copied().unwrap_or_default();
+        let resp = ui.interact(seg, ui.id().with(("pill-switch", label)), egui::Sense::click());
+        let on = i == selected;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, tr(label)));
+        if on {
+            if !t.dark() {
+                ui.painter().add(egui::Shadow { offset: [0, 1], blur: 3, spread: 0, color: Color32::from_black_alpha(30) }.as_shape(seg, t.r_pill()));
+            }
+            ui.painter().rect_filled(seg, t.r_pill(), thumb(&t));
+        } else {
+            let h = widgets::hover_t(ui, &resp);
+            ui.painter().rect_filled(seg, t.r_pill(), theme::mix(Color32::TRANSPARENT, faint_overlay(&t, 0.06), h));
+        }
+        let color = if on { t.text } else { t.text_dim };
+        ui.painter().galley_with_override_text_color(seg.center() - g.size() / 2.0, g, color);
+        if resp.has_focus() {
+            ui.painter().rect_stroke(seg, t.r_pill(), Stroke::new(2.0, t.text_dim), egui::StrokeKind::Inside);
+        }
+        let resp = if on { resp } else { resp.on_hover_cursor(egui::CursorIcon::PointingHand) };
+        if resp.clicked() && !on {
+            picked = Some(i);
+        }
+        x += w + gap;
+    }
+    picked
+}
+
+/// The chosen option's pill: a lighter grey on dark, white on light.
+fn thumb(t: &Tokens) -> Color32 {
+    if t.dark() { theme::mix(t.secondary_fill, t.text, 0.15) } else { Color32::WHITE }
+}
+
+/// The text colour at `alpha` (0..1): hover tints and outlines.
+pub(crate) fn faint_overlay(t: &Tokens, alpha: f32) -> Color32 {
+    t.text.gamma_multiply(alpha)
+}
+
+/// What a round button looks like.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Round {
+    /// White (black in light) with a dark glyph: send.
+    Primary,
+    /// The primary one with nothing to do yet: dimmed.
+    PrimaryDim,
+    /// A grey disc (attach, stop) from the composer's palette.
+    Control,
+    /// Page-coloured with a hairline ring (the details toggle).
+    Ringed,
+}
+
+/// The glyphs round buttons draw (painted, so they're crisp at any size).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Glyph {
+    Plus,
+    /// An x: take back, remove.
+    Cross,
+    ArrowUp,
+    Stop,
+    Pause,
+    /// « (`true`) or ».
+    Chevrons(bool),
+}
+
+/// A round button of `size` with a painted glyph, named `name` for screen readers and hover.
+pub(crate) fn round_button(ui: &mut Ui, size: f32, look: Round, glyph: Glyph, name: &str) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let sense = if look == Round::PrimaryDim { egui::Sense::hover() } else { egui::Sense::click() };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), sense);
+    let h = widgets::hover_t(ui, &resp);
+    let down = resp.is_pointer_button_down_on();
+    let (fill, ink) = match look {
+        Round::Primary => (theme::mix(t.accent, t.text_dim, if down { 0.25 } else { 0.12 * h }), t.on_accent),
+        Round::PrimaryDim => (t.secondary_fill, t.text_faint),
+        Round::Control => (theme::mix(t.composer_control, t.text, if down { 0.12 } else { 0.06 * h }), t.text),
+        Round::Ringed => (theme::mix(t.canvas, t.text, if down { 0.1 } else { 0.05 * h }), t.text),
+    };
+    let c = rect.center();
+    let r = size / 2.0;
+    ui.painter().circle_filled(c, r, fill);
+    if look == Round::Ringed {
+        ui.painter().circle_stroke(c, r - 0.5, Stroke::new(1.0, t.chrome_stroke));
+    }
+    paint_glyph(ui.painter(), rect, glyph, ink);
+    if resp.has_focus() {
+        ui.painter().circle_stroke(c, r + 2.0, Stroke::new(2.0, t.text_dim));
+    }
+    let label = tr(name);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, look != Round::PrimaryDim, &label));
+    let resp = if look == Round::PrimaryDim { resp } else { resp.on_hover_cursor(egui::CursorIcon::PointingHand) };
+    resp.on_hover_text(label)
+}
+
+fn paint_glyph(p: &egui::Painter, rect: egui::Rect, glyph: Glyph, ink: Color32) {
+    let c = rect.center();
+    let s = rect.width();
+    let stroke = Stroke::new((s / 14.0).clamp(1.4, 2.2), ink);
+    let line = |a: egui::Pos2, b: egui::Pos2| p.line_segment([a, b], stroke);
+    match glyph {
+        Glyph::Plus => {
+            let a = s * 0.24;
+            line(c - Vec2::new(a, 0.0), c + Vec2::new(a, 0.0));
+            line(c - Vec2::new(0.0, a), c + Vec2::new(0.0, a));
+        }
+        Glyph::Cross => {
+            let a = s * 0.17;
+            line(c - Vec2::splat(a), c + Vec2::splat(a));
+            line(c + Vec2::new(-a, a), c + Vec2::new(a, -a));
+        }
+        Glyph::ArrowUp => {
+            let a = s * 0.25;
+            line(c + Vec2::new(0.0, a), c - Vec2::new(0.0, a));
+            line(c - Vec2::new(0.0, a), c + Vec2::new(-a * 0.85, -a * 0.15));
+            line(c - Vec2::new(0.0, a), c + Vec2::new(a * 0.85, -a * 0.15));
+        }
+        Glyph::Stop => {
+            p.rect_filled(egui::Rect::from_center_size(c, Vec2::splat(s * 0.32)), 2.0, ink);
+        }
+        Glyph::Pause => {
+            let (w, h, gap) = (s * 0.11, s * 0.36, s * 0.08);
+            for dx in [-(gap + w / 2.0), gap + w / 2.0] {
+                p.rect_filled(egui::Rect::from_center_size(c + Vec2::new(dx, 0.0), Vec2::new(w, h)), 1.0, ink);
+            }
+        }
+        Glyph::Chevrons(left) => {
+            let (a, d) = (s * 0.14, s * 0.15);
+            let dir = if left { -1.0 } else { 1.0 };
+            for off in [-d / 2.0 - a * 0.2, d / 2.0 + a * 0.2] {
+                let tip = c + Vec2::new(off + dir * a / 2.0, 0.0);
+                let back = tip - Vec2::new(dir * a, 0.0);
+                line(tip, back + Vec2::new(0.0, -a));
+                line(tip, back + Vec2::new(0.0, a));
+            }
+        }
+    }
+}
+
+/// A vertical fade over `rect`: `colour` at the top edge (`down`) or the bottom one, clear at the
+/// other. Content scrolling under the floating header and composer melts into the page.
+/// `hold`: how much of it, from the coloured edge, is solid.
+pub(crate) fn fade(p: &egui::Painter, rect: egui::Rect, colour: Color32, down: bool, hold: f32) {
+    let mut mesh = egui::Mesh::default();
+    // Solid for the first `hold` of it (from the coloured edge), then three bands so it eases
+    // rather than ramps.
+    let hold = hold.clamp(0.0, 0.9);
+    let stops = [(0.0, 1.0), (hold, 1.0), (hold + (1.0 - hold) * 0.45, 0.6), (1.0, 0.0)];
+    for (i, (at, k)) in stops.iter().enumerate() {
+        let y = egui::lerp(rect.top()..=rect.bottom(), if down { *at } else { 1.0 - at });
+        let c = colour.gamma_multiply(*k);
+        mesh.colored_vertex(egui::pos2(rect.left(), y), c);
+        mesh.colored_vertex(egui::pos2(rect.right(), y), c);
+        if i > 0 {
+            let b = (i as u32) * 2;
+            mesh.add_triangle(b - 2, b - 1, b);
+            mesh.add_triangle(b - 1, b, b + 1);
+        }
+    }
+    p.add(egui::Shape::mesh(mesh));
 }
 
 /// Light Markdown (headings, bullets, code fences, **bold**) with glossary hovers when `glossary`.
@@ -553,7 +846,7 @@ pub fn rich_text(ui: &mut Ui, text: &str, with_glossary: bool) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             if bullet {
-                ui.label(RichText::new("  •  ").color(t.accent));
+                ui.label(RichText::new("  •  ").color(t.text_dim));
             }
             inline(ui, rest, with_glossary, &body, &t);
         });

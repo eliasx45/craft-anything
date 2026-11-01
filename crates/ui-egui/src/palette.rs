@@ -106,18 +106,23 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
     let width = 620.0_f32.min(screen.width() - 40.0);
     let pos = egui::pos2(screen.center().x - width / 2.0, screen.top() + 80.0);
     // Scrim
-    ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("palette-scrim"))).rect_filled(screen, 0.0, t.shadow.gamma_multiply(0.6));
+    ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("palette-scrim"))).rect_filled(screen, 0.0, crate::home::scrim(&t));
+    // A popover: r16 on the raised fill, a faint inner outline and a soft deep shadow.
     let resp = egui::Area::new(egui::Id::new("palette")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::new()
-            .fill(t.card)
-            .stroke(egui::Stroke::new(1.0, t.card_border))
+            .fill(t.raised)
+            .stroke(egui::Stroke::new(1.0, t.chrome_stroke))
             .corner_radius(t.r_lg())
-            .shadow(ui.visuals().window_shadow)
-            .inner_margin(Margin::same(10))
+            .shadow(egui::Shadow { offset: [0, 8], blur: 40, spread: 0, color: egui::Color32::from_black_alpha(if t.dark() { 64 } else { 36 }) })
+            .inner_margin(Margin::same(6))
             .show(ui, |ui| {
                 ui.set_width(width);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    icons::show(ui, "search", 18.0, t.text_faint);
+                    ui.add_space(8.0);
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    icons::show(ui, "search", 16.0, t.text_dim);
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut app.state.palette.query)
                             .hint_text(tr("Type a command or tool…"))
@@ -130,17 +135,26 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
                         app.state.palette.selected = 0;
                     }
                 });
+                ui.add_space(8.0);
+                // A divider: 0.5 px, inset 10.
+                let y = ui.cursor().top();
+                let x = ui.max_rect().x_range();
+                ui.painter().hline((x.min + 10.0)..=(x.max - 10.0), y, egui::Stroke::new(0.5, crate::make::tint(&t, 0.10)));
                 ui.add_space(6.0);
-                ui.separator();
                 egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
                     if ranked.is_empty() {
-                        ui.label(RichText::new(tr("Nothing matches.")).color(t.text_faint));
+                        ui.horizontal(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new(tr("Nothing matches.")).color(t.text_faint));
+                        });
                     }
                     for (i, (_, e)) in ranked.iter().enumerate() {
                         let on = i == app.state.palette.selected;
-                        let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 40.0), egui::Sense::click());
+                        let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.0), egui::Sense::click());
+                        // Menu rows: no fill at rest, a soft tint on the keyboard's row and under the pointer.
                         if on || r.hovered() {
-                            ui.painter().rect_filled(rect, t.radius_sm, if on { t.accent_soft } else { t.hover });
+                            ui.painter().rect_filled(rect, t.r_sm(), crate::make::tint(&t, if on { 0.07 } else { 0.05 }));
                         }
                         if on {
                             r.scroll_to_me(None);
@@ -152,26 +166,44 @@ pub fn show(app: &mut CraftApp, ctx: &egui::Context) {
                         r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, &title));
                         icons::paint(
                             ui,
-                            egui::Rect::from_min_size(rect.min + Vec2::new(8.0, 12.0), Vec2::splat(16.0)),
+                            egui::Rect::from_center_size(egui::pos2(rect.left() + 19.0, rect.center().y), Vec2::splat(16.0)),
                             icon,
-                            16.0,
-                            if on { t.accent_ink } else { t.icon },
+                            15.0,
+                            if on { t.text } else { t.text_dim },
                         );
-                        ui.painter().text(rect.min + Vec2::new(34.0, 5.0), egui::Align2::LEFT_TOP, title, theme::medium(theme::SMALL), t.text);
-                        let sub_g = ui.painter().layout_no_wrap(crate::evidence_ui::truncate(&sub, 90), egui::FontId::proportional(theme::TINY), t.text_faint);
-                        ui.painter().with_clip_rect(rect.shrink(2.0)).galley(rect.min + Vec2::new(34.0, 23.0), sub_g, t.text_faint);
+                        // The tag at the right, then the title and (faint, cut to fit) what it does.
                         let tag_g = ui.painter().layout_no_wrap(tag, egui::FontId::proportional(theme::TINY), t.text_dim);
-                        let tr_ =
-                            egui::Rect::from_min_size(egui::pos2(rect.right() - tag_g.size().x - 18.0, rect.top() + 6.0), tag_g.size() + Vec2::new(10.0, 4.0));
-                        ui.painter().rect_filled(tr_, 6.0, t.raised);
-                        ui.painter().galley(tr_.min + Vec2::new(5.0, 2.0), tag_g, t.text_dim);
+                        let tag_r = egui::Rect::from_center_size(
+                            egui::pos2(rect.right() - 12.0 - tag_g.size().x / 2.0 - 7.0, rect.center().y),
+                            tag_g.size() + Vec2::new(14.0, 4.0),
+                        );
+                        ui.painter().rect_filled(tag_r, t.r_pill(), crate::make::tint(&t, 0.075));
+                        ui.painter().galley(tag_r.center() - tag_g.size() / 2.0, tag_g, t.text_dim);
+                        let text_x = rect.left() + 38.0;
+                        let clip = egui::Rect::from_min_max(egui::pos2(text_x, rect.top()), egui::pos2(tag_r.left() - 12.0, rect.bottom()));
+                        let title_g = ui.painter().layout_no_wrap(title, egui::FontId::proportional(theme::CAPTION + 1.0), t.text);
+                        let title_w = title_g.size().x;
+                        ui.painter().with_clip_rect(clip).galley(egui::pos2(text_x, rect.center().y - title_g.size().y / 2.0), title_g, t.text);
+                        if !sub.is_empty() {
+                            let sub_g =
+                                ui.painter().layout_no_wrap(crate::evidence_ui::truncate(&sub, 90), egui::FontId::proportional(theme::TINY), t.text_faint);
+                            ui.painter().with_clip_rect(clip).galley(
+                                egui::pos2(text_x + title_w + 10.0, rect.center().y - sub_g.size().y / 2.0),
+                                sub_g,
+                                t.text_faint,
+                            );
+                        }
                         if r.clicked() {
                             chosen = Some(i);
                         }
                     }
                 });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new(tr("↑↓ to move · Enter to run · Esc to close")).color(t.text_faint).size(theme::TINY));
+                });
                 ui.add_space(4.0);
-                ui.label(RichText::new(tr("↑↓ to move · Enter to run · Esc to close")).color(t.text_faint).size(theme::TINY));
             });
     });
     if enter && n > 0 {
@@ -241,6 +273,7 @@ fn form(app: &mut CraftApp, ctx: &egui::Context, tool: &str) {
     let mut open = true;
     egui::Window::new(RichText::new(tr(spec.title)).font(theme::semibold(theme::BODY)))
         .id(egui::Id::new("tool-form"))
+        .frame(crate::home::sheet_frame(&t, 20))
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
@@ -262,6 +295,7 @@ fn form(app: &mut CraftApp, ctx: &egui::Context, tool: &str) {
             }
             ui.add_space(10.0);
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
                 if widgets::primary_icon(ui, Some("play"), "Run", true).clicked() {
                     run = true;
                 }

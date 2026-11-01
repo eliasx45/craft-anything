@@ -166,9 +166,9 @@ fn rail_icons(app: &mut CraftApp, ui: &mut Ui) {
 fn panel_title(ui: &mut Ui, title: &str, count: Option<usize>) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.label(theme::label_text(&tr(title), 11.5).color(t.text));
+        ui.label(RichText::new(tr(title)).font(theme::semibold(theme::BODY)).color(t.text));
         if let Some(n) = count {
-            widgets::pill(ui, &n.to_string(), t.text_dim, t.raised);
+            widgets::pill(ui, &n.to_string(), t.text_dim, widgets::tint(&t, 0.08));
         }
     });
 }
@@ -271,16 +271,16 @@ fn list_row(ui: &mut Ui, r: &Value, selected: bool, h: f32) -> bool {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), egui::Sense::click());
     if selected {
-        ui.painter().rect_filled(rect, t.radius_sm, t.accent_soft);
+        ui.painter().rect_filled(rect, t.radius_sm, t.selected_row);
     } else if resp.hovered() {
         ui.painter().rect_filled(rect, t.radius_sm, t.hover);
     }
     let name = row_name(r).unwrap_or_else(|| truncate(&r.to_string(), 80));
     let addr = row_address(r);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &name));
-    let x = rect.left() + 8.0;
+    let x = rect.left() + 10.0;
     if let Some(a) = &addr {
-        let g = ui.painter().layout_no_wrap(a.clone(), theme::mono(11.0), if selected { t.accent_ink } else { t.text_faint });
+        let g = ui.painter().layout_no_wrap(a.clone(), theme::mono(11.0), if selected { t.text_dim } else { t.text_faint });
         ui.painter().galley(egui::pos2(x, rect.top() + 3.0), g, t.text_faint);
     }
     let name_y = if addr.is_some() { rect.top() + 17.0 } else { rect.center().y - 8.0 };
@@ -289,7 +289,7 @@ fn list_row(ui: &mut Ui, r: &Value, selected: bool, h: f32) -> bool {
     ui.painter().with_clip_rect(clip).galley(egui::pos2(x, name_y), name_g, t.text);
     if let Some(d) = row_detail(r) {
         let g = ui.painter().layout_no_wrap(d, egui::FontId::proportional(theme::TINY), t.text_faint);
-        let pos = egui::pos2(rect.right() - g.size().x - 8.0, rect.top() + 4.0);
+        let pos = egui::pos2(rect.right() - g.size().x - 10.0, rect.top() + 4.0);
         ui.painter().with_clip_rect(clip).galley(pos, g, t.text_faint);
     }
     resp.clicked()
@@ -325,13 +325,13 @@ fn targets_list(app: &mut CraftApp, ui: &mut Ui) {
         let active = app.view.active.as_ref() == Some(&tgt.id);
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 50.0), egui::Sense::click());
         if active {
-            ui.painter().rect_filled(rect, t.radius, t.accent_soft);
+            ui.painter().rect_filled(rect, t.radius, t.selected_row);
         } else if resp.hovered() {
             ui.painter().rect_filled(rect, t.radius, t.hover);
         }
         let ir = egui::Rect::from_min_size(rect.min + Vec2::new(8.0, 10.0), Vec2::splat(30.0));
-        ui.painter().rect_filled(ir, t.radius_sm, t.raised);
-        icons::paint(ui, ir, crate::kind_icon(tgt.kind), 16.0, if active { t.accent_ink } else { t.icon });
+        ui.painter().circle_filled(ir.center(), 15.0, t.secondary_fill);
+        icons::paint(ui, ir, crate::kind_icon(tgt.kind), 15.0, if active { t.text } else { t.icon });
         ui.painter().text(egui::pos2(ir.right() + 10.0, rect.top() + 8.0), egui::Align2::LEFT_TOP, &tgt.name, theme::medium(theme::SMALL), t.text);
         ui.painter().text(
             egui::pos2(ir.right() + 10.0, rect.top() + 27.0),
@@ -352,39 +352,33 @@ fn targets_list(app: &mut CraftApp, ui: &mut Ui) {
     }
 }
 
-/// A tab strip; returns the clicked tab index.
+/// A tab strip of capsule chips: the chosen one on a grey capsule in the text colour, the others
+/// quiet until hovered. Returns the clicked tab index.
 fn tab_strip(ui: &mut Ui, tabs: &[(&str, &str)], selected: usize) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
     let mut picked = None;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.spacing_mut().item_spacing.x = 4.0;
         for (i, (icon, title)) in tabs.iter().enumerate() {
             let on = i == selected;
-            let g = widgets::label_galley(ui, &tr(title), 11.0, t.text);
-            let w = g.size().x + if icon.is_empty() { 22.0 } else { 42.0 };
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 32.0), egui::Sense::click());
+            let g = ui.painter().layout_no_wrap(tr(title), theme::medium(theme::SMALL), t.text);
+            let w = g.size().x + if icon.is_empty() { 24.0 } else { 44.0 };
+            let (slot, resp) = ui.allocate_exact_size(Vec2::new(w, 36.0), egui::Sense::click());
+            let rect = egui::Rect::from_center_size(slot.center(), Vec2::new(w, 28.0));
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, tr(title)));
-            if !on {
-                let h = widgets::hover_t(ui, &resp);
-                ui.painter().rect_filled(rect.shrink2(Vec2::new(0.0, 3.0)), t.radius_sm, theme::mix(egui::Color32::TRANSPARENT, t.hover, h));
+            let h = widgets::hover_t(ui, &resp);
+            let alpha = if on { 0.12 } else { 0.06 * h };
+            if alpha > 0.0 {
+                ui.painter().rect_filled(rect, t.r_pill(), widgets::tint(&t, alpha));
             }
-            widgets::focus_ring(ui, &resp, rect.shrink2(Vec2::new(0.0, 3.0)));
-            let col = if on { t.text } else { t.text_dim };
-            let mut x = rect.left() + 10.0;
+            widgets::focus_ring(ui, &resp, rect);
+            let col = if on { t.text } else { theme::mix(t.text_dim, t.text, h) };
+            let mut x = rect.left() + 12.0;
             if !icon.is_empty() {
-                icons::paint(
-                    ui,
-                    egui::Rect::from_min_size(egui::pos2(x, rect.center().y - 7.0), Vec2::splat(14.0)),
-                    icon,
-                    14.0,
-                    if on { t.accent } else { t.text_faint },
-                );
+                icons::paint(ui, egui::Rect::from_min_size(egui::pos2(x, rect.center().y - 7.0), Vec2::splat(14.0)), icon, 14.0, col);
                 x += 20.0;
             }
             ui.painter().galley_with_override_text_color(egui::pos2(x, rect.center().y - g.size().y / 2.0), g, col);
-            if on {
-                ui.painter().hline(rect.x_range().shrink(6.0), rect.bottom() - 1.0, egui::Stroke::new(2.0, t.accent));
-            }
             if resp.clicked() && !on {
                 picked = Some(i);
             }
@@ -395,7 +389,7 @@ fn tab_strip(ui: &mut Ui, tabs: &[(&str, &str)], selected: usize) -> Option<usiz
 
 fn center(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(t.chrome).inner_margin(Margin::symmetric(8, 0)).show(ui, |ui| {
+    egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: 10, right: 10, top: 4, bottom: 0 }).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let tabs: Vec<(&str, &str)> = CenterTab::ALL.iter().map(|c| (c.icon(), c.title())).collect();
         let sel = CenterTab::ALL.iter().position(|c| *c == app.state.center).unwrap_or(0);
@@ -408,8 +402,7 @@ fn center(app: &mut CraftApp, ui: &mut Ui) {
             }
         }
     });
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.separator));
-    egui::Frame::new().inner_margin(Margin::same(14)).show(ui, |ui| {
+    egui::Frame::new().inner_margin(Margin { left: 14, right: 14, top: 6, bottom: 14 }).show(ui, |ui| {
         ui.set_width(ui.available_width());
         if app.view.active.is_none() && app.state.center != CenterTab::Result {
             no_target(app, ui);
@@ -780,7 +773,7 @@ fn inspector(app: &mut CraftApp, ui: &mut Ui) {
                     ui.set_width(ui.available_width());
                     widgets::caption(ui, "Target");
                     ui.horizontal(|ui| {
-                        icons::show(ui, crate::kind_icon(tgt.kind), 16.0, t.accent);
+                        icons::show(ui, crate::kind_icon(tgt.kind), 16.0, t.text);
                         ui.label(RichText::new(&tgt.name).font(theme::semibold(theme::SMALL)));
                     });
                     ui.label(RichText::new(tr(tgt.kind.plain())).color(t.text_dim));
@@ -848,8 +841,8 @@ fn unknowns(app: &mut CraftApp, ui: &mut Ui) {
                         craft_anything_engine::evidence::Severity::Medium => t.warning,
                         craft_anything_engine::evidence::Severity::Low => t.text_dim,
                     };
-                    widgets::pill(ui, &sev, col, t.raised);
-                    widgets::pill(ui, &format!("{:?}", u.status), t.text_dim, t.raised);
+                    widgets::pill(ui, &sev, col, widgets::tint(&t, 0.07));
+                    widgets::pill(ui, &format!("{:?}", u.status), t.text_dim, widgets::tint(&t, 0.07));
                     ui.label(RichText::new(&u.domain).color(t.text_faint).size(theme::TINY));
                 });
                 ui.add(egui::Label::new(RichText::new(&u.question)).wrap());
@@ -871,7 +864,6 @@ fn status_line(app: &CraftApp, ui: &mut Ui) {
 }
 
 fn bottom(app: &mut CraftApp, ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         let n_jobs = app.jobs.running().filter(|j| j.visible).count();
         let jobs_title = if n_jobs > 0 { crate::i18n::trf("Jobs ({n})", &[("n", &n_jobs.to_string())]) } else { tr("Jobs") };
@@ -891,8 +883,7 @@ fn bottom(app: &mut CraftApp, ui: &mut Ui) {
             status_line(app, ui);
         });
     });
-    ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), egui::Stroke::new(1.0, t.separator));
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     match app.state.bottom {
         BottomTab::Agent => chat::conversation(app, ui, true),
         BottomTab::Jobs => jobs(app, ui),

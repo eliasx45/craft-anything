@@ -8,7 +8,7 @@ use crate::theme::{self, Tokens};
 use crate::{CraftApp, icons, widgets};
 use craft_anything_engine::evidence::ToolError;
 use craft_anything_engine::workspace::Workspace;
-use egui::{RichText, Ui, Vec2};
+use egui::{RichText, Ui};
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -105,9 +105,10 @@ fn project<'a>(app: &'a CraftApp, root: &Path) -> Option<&'a Workspace> {
 
 pub fn rename_modal(app: &mut CraftApp, ui: &mut Ui, root: &Path, close: &mut bool) {
     let t = Tokens::get(ui.ctx());
-    ui.label(theme::heading(tr("Rename the project"), theme::SECTION));
+    ui.label(theme::heading(tr("Rename the project"), crate::home::DIALOG_TITLE));
     ui.add_space(8.0);
-    let r = ui.add(egui::TextEdit::singleline(&mut app.state.rename_input).desired_width(f32::INFINITY).frame(widgets::text_field_frame(&t)));
+    let r =
+        ui.add(egui::TextEdit::singleline(&mut app.state.rename_input).desired_width(f32::INFINITY).frame(widgets::text_field_frame(&t).corner_radius(t.r())));
     widgets::named(r.clone(), "Project name");
     if !r.has_focus() && !r.lost_focus() {
         r.request_focus();
@@ -115,8 +116,9 @@ pub fn rename_modal(app: &mut CraftApp, ui: &mut Ui, root: &Path, close: &mut bo
     let ok = !app.state.rename_input.trim().is_empty();
     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     ui.add(egui::Label::new(RichText::new(tr("Only its name changes; its folder stays where it is.")).color(t.text_faint).size(theme::SMALL)).wrap());
-    ui.add_space(12.0);
+    ui.add_space(18.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if (widgets::primary_icon(ui, None, "Rename", ok).clicked() || enter) && ok {
             let name = app.state.rename_input.trim().to_string();
             app.rename_project(root, &name);
@@ -134,13 +136,10 @@ pub fn delete_modal(app: &mut CraftApp, ui: &mut Ui, root: &Path, close: &mut bo
         *close = true;
         return;
     };
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(40.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, t.radius, t.raised);
-        icons::paint(ui, rect, "trash-2", 20.0, t.danger);
-        ui.label(theme::heading(trf("Delete {name}?", &[("name", &ws.manifest.name)]), theme::SECTION));
-    });
-    ui.add_space(8.0);
+    crate::home::dialog_icon(ui, "trash-2", t.danger);
+    ui.add_space(14.0);
+    ui.label(theme::heading(trf("Delete {name}?", &[("name", &ws.manifest.name)]), crate::home::DIALOG_TITLE));
+    ui.add_space(6.0);
     // What goes and what stays, in so many words: it can't be undone.
     let m = &ws.manifest;
     let what = if m.app_in_root || !m.start_files.is_empty() {
@@ -152,8 +151,9 @@ pub fn delete_modal(app: &mut CraftApp, ui: &mut Ui, root: &Path, close: &mut bo
     ui.add(egui::Label::new(RichText::new(crate::short_path(&ws.root)).font(theme::mono(12.0)).color(t.text_faint)).truncate());
     ui.add_space(4.0);
     ui.label(RichText::new(tr("This can't be undone.")).color(t.danger).size(theme::SMALL));
-    ui.add_space(12.0);
+    ui.add_space(18.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if widgets::secondary(ui, Some("trash-2"), "Delete it").clicked() {
             app.delete_project(root);
             *close = true;

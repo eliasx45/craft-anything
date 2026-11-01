@@ -7,7 +7,7 @@ use crate::state::Modal;
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, Pick, widgets};
 use craft_anything_engine::workspace::{self, ExistingFiles, FolderState, Workspace};
-use egui::{RichText, Ui, Vec2};
+use egui::{RichText, Ui};
 use std::path::PathBuf;
 
 /// The Make screen's "Saved in" line: the folder the project will be in, and a way to pick another.
@@ -37,17 +37,17 @@ pub fn make_line(app: &mut CraftApp, ui: &mut Ui) {
         ui.add_space(22.0);
         if let Some(how) = how {
             ui.label(RichText::new(how).size(theme::SMALL).color(t.text_dim));
-            if widgets::link(ui, "Change").clicked() {
+            if crate::make::quiet_link(ui, "Change").clicked() {
                 app.state.modal = Some(Modal::ExistingFiles);
             }
             ui.label(RichText::new("·").size(theme::SMALL).color(t.text_faint));
         }
-        if widgets::link(ui, if picked { "Pick another folder…" } else { "Choose a folder…" }).clicked() {
+        if crate::make::quiet_link(ui, if picked { "Pick another folder…" } else { "Choose a folder…" }).clicked() {
             app.pick(Pick::ProjectFolder);
         }
         if picked {
             ui.label(RichText::new("·").size(theme::SMALL).color(t.text_faint));
-            if widgets::link(ui, "Use the projects folder").clicked() {
+            if crate::make::quiet_link(ui, "Use the projects folder").clicked() {
                 clear(app);
             }
         }
@@ -120,21 +120,22 @@ pub fn existing_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         return;
     };
     let (names, count) = app.state.make.folder_files.clone().unwrap_or_default();
-    ui.label(theme::heading(tr("This folder already has files"), theme::SECTION));
-    ui.add_space(4.0);
+    ui.label(theme::heading(tr("This folder already has files"), crate::home::DIALOG_TITLE));
+    ui.add_space(6.0);
     let some = names.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
     let more = if count > 4 { trf(" and {n} more", &[("n", &(count - 4).to_string())]) } else { String::new() };
     ui.add(egui::Label::new(RichText::new(format!("{}: {some}{more}.", folder.display())).color(t.text_dim)).wrap());
     ui.add_space(4.0);
     ui.label(RichText::new(tr("How should the builder use them?")).color(t.text));
-    ui.add_space(12.0);
+    ui.add_space(14.0);
     let current = app.state.make.existing;
-    let size = Vec2::new(268.0, 168.0);
+    let w = ui.available_width();
     let mut chosen = None;
-    ui.horizontal(|ui| {
-        let edit = widgets::choice_tile(
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        let edit = crate::make::option_card(
             ui,
-            size,
+            w,
             "code",
             "They're my app: edit them in place",
             "The builder works on these files directly and keeps what works. Craft Anything adds a few records of its own beside them.",
@@ -143,9 +144,9 @@ pub fn existing_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
         if edit.clicked() {
             chosen = Some(ExistingFiles::Edit);
         }
-        let start = widgets::choice_tile(
+        let start = crate::make::option_card(
             ui,
-            size,
+            w,
             "layers",
             "Start from them",
             "The builder reads them (code, notes, pictures) and builds the app in a new app folder beside them. Your files stay as they are.",
@@ -155,12 +156,12 @@ pub fn existing_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
             chosen = Some(ExistingFiles::StartFrom);
         }
     });
-    ui.add_space(12.0);
+    ui.add_space(14.0);
     let mut remember = app.state.make.remember_existing;
     if widgets::toggle(ui, &mut remember, "Don't ask again (you can change this in Settings)").changed() {
         app.state.make.remember_existing = remember;
     }
-    ui.add_space(12.0);
+    ui.add_space(18.0);
     if widgets::secondary(ui, None, "Cancel: don't use this folder").clicked() {
         clear(app);
         *close = true;

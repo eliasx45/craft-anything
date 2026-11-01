@@ -1,6 +1,6 @@
 //! The prompt box used everywhere the person types to the builder or the assistant: it grows
 //! with the text (Enter sends, Shift+Enter adds a line), shows attached pictures as chips, and
-//! has the attach, stop and send buttons in its bottom row. Up at the start of the box takes back
+//! has round attach, stop and send buttons beside the text. Up at the start of the box takes back
 //! the last message still waiting, to edit it; with none waiting, Up at the very start and Down at
 //! the very end go through earlier prompts, and Down past the newest brings back what was being
 //! typed. Anywhere else they move the cursor as usual.
@@ -110,98 +110,139 @@ pub fn show(ui: &mut Ui, text: &mut String, attachments: &[PathBuf], b: PromptBo
     let mut out = PromptOut::default();
     let id = ui.make_persistent_id(("prompt-box", b.name));
     let focused = ui.memory(|m| m.has_focus(id));
-    let stroke = egui::Stroke::new(1.0, if focused { t.text_faint } else { t.field_border });
+    // A floating surface: its own fill, a faint outline (a little stronger while typing) and a
+    // soft shadow.
+    let outline = crate::chat::faint_overlay(&t, if focused { 0.26 } else { 0.18 });
     let frame = egui::Frame::new()
-        .fill(t.card)
-        .stroke(stroke)
-        .corner_radius(t.r_lg())
-        .shadow(egui::Shadow { offset: [0, 2], blur: 12, spread: 0, color: t.shadow })
-        .inner_margin(Margin { left: 16, right: 10, top: 14, bottom: 10 });
+        .fill(t.composer)
+        .stroke(egui::Stroke::new(1.0, outline))
+        .corner_radius(t.r_xl())
+        .shadow(egui::Shadow { offset: [0, 2], blur: 20, spread: 0, color: egui::Color32::from_black_alpha(if t.dark() { 70 } else { 18 }) })
+        .inner_margin(Margin { left: 8, right: 8, top: 7, bottom: 7 });
     // Stacked top to bottom whatever the caller's layout (it's often placed in a row).
-    frame.show(ui, |ui| {
-        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_width(ui.available_width());
-            if !attachments.is_empty() {
-                ui.horizontal_wrapped(|ui| {
-                    for (i, p) in attachments.iter().enumerate() {
-                        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        egui::Frame::new()
-                            .fill(t.raised)
-                            .stroke(egui::Stroke::new(1.0, t.card_border))
-                            .corner_radius(t.r_sm())
-                            .inner_margin(Margin { left: 8, right: 2, top: 2, bottom: 2 })
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    icons::show(ui, "paperclip", 13.0, t.icon);
-                                    ui.add(egui::Label::new(RichText::new(&name).size(theme::SMALL)).truncate()).on_hover_text(p.display().to_string());
-                                    if icons::button(ui, "x", 24.0, false, &trf("Remove {name}", &[("name", &name)])).clicked() {
-                                        out.remove = Some(i);
-                                    }
-                                });
-                            });
-                    }
-                });
-                ui.add_space(6.0);
-            }
-            let line = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(b.font_size)));
-            // Up at the very start (or in an empty box) takes back the last waiting message; it's
-            // consumed before the field sees it, and anywhere else Up moves the cursor as usual.
-            // The caller fills the text in after this frame; the cursor goes to its end on the next.
-            let to_end = id.with("cursor-to-end");
-            if ui.data_mut(|d| d.remove_temp::<bool>(to_end)).is_some() {
-                cursor_to_end(ui.ctx(), id, text);
-            }
-            if b.recall && focused && at_start(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-                out.recall = true;
-                ui.data_mut(|d| d.insert_temp(to_end, true));
-            } else if let Some(history) = b.history.filter(|_| focused && !b.recall) {
-                browse(ui, id, text, history);
-            }
-            // No "more below" fade: the frame after each keystroke the scroll area briefly
-            // measures a few points of overflow, and the fade blinked over the line being typed.
-            ui.spacing_mut().scroll.fade.strength = 0.0;
-            egui::ScrollArea::vertical().id_salt(id.with("scroll")).max_height(line * b.rows.1 as f32 + 4.0).stick_to_bottom(true).show(ui, |ui| {
-                let r = ui.add(
-                    egui::TextEdit::multiline(text)
-                        .id(id)
-                        .hint_text(&b.hint)
-                        .frame(egui::Frame::NONE)
-                        .desired_rows(b.rows.0)
-                        .desired_width(f32::INFINITY)
-                        .font(egui::FontId::proportional(b.font_size))
-                        // Enter sends; Shift+Enter starts a new line.
-                        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))),
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+        frame.show(ui, |ui| {
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(ui.available_width());
+                if !attachments.is_empty() {
+                    attachment_chips(ui, attachments, &t, &mut out);
+                    ui.add_space(6.0);
+                }
+                // Attach on the left, the text in the middle, stop and send on the right, all
+                // sitting on the last line as the text grows.
+                use crate::chat::{Glyph, Round, round_button};
+                // The text is laid out first (its height decides the row's), then the buttons
+                // are placed level with its last line.
+                let (gap, row) = (8.0, ui.available_rect_before_wrap());
+                // A box that is several lines tall from the start (the Make screen) keeps its text
+                // the full width and puts the round controls on a row of their own underneath,
+                // so no empty column runs beside the text.
+                let stacked = b.rows.0 > 1;
+                let left = if b.attach.is_some() && !stacked { CONTROL + gap } else { 0.0 };
+                let buttons = usize::from(b.send) + usize::from(b.stop_button.is_some());
+                let right = if stacked { 0.0 } else { buttons as f32 * (CONTROL + gap) };
+                let field_rect = egui::Rect::from_min_max(
+                    egui::pos2(row.left() + left, row.top()),
+                    egui::pos2((row.right() - right).max(row.left() + left + 60.0), row.bottom()),
                 );
-                widgets::named(r.clone(), b.name);
-                if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) && !text.trim().is_empty() {
-                    out.send = true;
+                let mut field_ui = ui.new_child(egui::UiBuilder::new().max_rect(field_rect).layout(egui::Layout::top_down(egui::Align::Min)));
+                field(&mut field_ui, id, text, &b, focused, &mut out);
+                let text_h = field_ui.min_rect().height();
+                let has_controls = b.attach.is_some() || buttons > 0;
+                let h = if stacked && has_controls { text_h + 6.0 + CONTROL } else { text_h.max(CONTROL) };
+                let at = |x: f32| egui::Rect::from_min_size(egui::pos2(x, row.top() + h - CONTROL), egui::Vec2::splat(CONTROL));
+                let place = |ui: &mut Ui, x: f32, add: &mut dyn FnMut(&mut Ui) -> bool| {
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at(x)).layout(egui::Layout::left_to_right(egui::Align::Min)));
+                    add(&mut child)
+                };
+                if let Some(tip) = b.attach {
+                    out.attach |= place(ui, row.left(), &mut |ui| round_button(ui, CONTROL, Round::Control, Glyph::Plus, tip).clicked());
                 }
-            });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if let Some(tip) = b.attach
-                    && icons::button(ui, "paperclip", 30.0, false, tip).clicked()
-                {
-                    out.attach = true;
+                let mut x = row.right() - CONTROL;
+                if b.send {
+                    let ready = !text.trim().is_empty();
+                    out.send |= place(ui, x, &mut |ui| send_button(ui, ready).clicked() && ready);
+                    x -= CONTROL + gap;
                 }
-                ui.label(RichText::new(tr("Enter to send · Shift+Enter for a new line")).size(theme::CAPTION).color(t.text_faint));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if b.send {
-                        let ready = !text.trim().is_empty();
-                        if send_button(ui, ready).clicked() && ready {
-                            out.send = true;
-                        }
-                    }
-                    if let Some(name) = b.stop_button
-                        && icons::button(ui, "circle-stop", 30.0, false, name).clicked()
-                    {
-                        out.stop = true;
-                    }
-                });
-            });
-        })
+                if let Some(name) = b.stop_button {
+                    let glyph = if name == "Pause" { Glyph::Pause } else { Glyph::Stop };
+                    out.stop |= place(ui, x, &mut |ui| round_button(ui, CONTROL, Round::Control, glyph, name).clicked());
+                }
+                ui.allocate_rect(egui::Rect::from_min_size(row.min, egui::vec2(row.width(), h)), egui::Sense::hover());
+            })
+        });
+        // How the keys work, quietly under the box.
+        ui.add_space(3.0);
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            ui.label(RichText::new(tr("Enter to send · Shift+Enter for a new line")).size(theme::TINY).color(t.text_faint));
+        });
     });
     out
+}
+
+/// The round controls in the box (attach, stop, send).
+const CONTROL: f32 = 25.0;
+
+/// Attached pictures as small pills, each with its own remove button.
+fn attachment_chips(ui: &mut Ui, attachments: &[PathBuf], t: &Tokens, out: &mut PromptOut) {
+    ui.horizontal_wrapped(|ui| {
+        for (i, p) in attachments.iter().enumerate() {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            egui::Frame::new().fill(t.composer_control).corner_radius(t.r_pill()).inner_margin(Margin { left: 10, right: 2, top: 2, bottom: 2 }).show(
+                ui,
+                |ui| {
+                    ui.horizontal(|ui| {
+                        icons::show(ui, "paperclip", 13.0, t.icon);
+                        ui.add(egui::Label::new(RichText::new(&name).size(theme::SMALL)).truncate()).on_hover_text(p.display().to_string());
+                        if icons::button(ui, "x", 22.0, false, &trf("Remove {name}", &[("name", &name)])).clicked() {
+                            out.remove = Some(i);
+                        }
+                    });
+                },
+            );
+        }
+    });
+}
+
+/// The text field: grows with its text up to `rows.1` lines, then scrolls.
+fn field(ui: &mut Ui, id: egui::Id, text: &mut String, b: &PromptBox, focused: bool, out: &mut PromptOut) {
+    let line = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(b.font_size)));
+    // Up at the very start (or in an empty box) takes back the last waiting message; it's
+    // consumed before the field sees it, and anywhere else Up moves the cursor as usual.
+    // The caller fills the text in after this frame; the cursor goes to its end on the next.
+    let to_end = id.with("cursor-to-end");
+    if ui.data_mut(|d| d.remove_temp::<bool>(to_end)).is_some() {
+        cursor_to_end(ui.ctx(), id, text);
+    }
+    if b.recall && focused && at_start(ui.ctx(), id, text) && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+        out.recall = true;
+        ui.data_mut(|d| d.insert_temp(to_end, true));
+    } else if let Some(history) = b.history.filter(|_| focused && !b.recall) {
+        browse(ui, id, text, history);
+    }
+    // One line sits level with the round buttons beside it.
+    let pad_y = ((CONTROL - line) / 2.0).max(1.0);
+    // No "more below" fade: the frame after each keystroke the scroll area briefly
+    // measures a few points of overflow, and the fade blinked over the line being typed.
+    ui.spacing_mut().scroll.fade.strength = 0.0;
+    egui::ScrollArea::vertical().id_salt(id.with("scroll")).max_height(line * b.rows.1 as f32 + pad_y * 2.0 + 4.0).stick_to_bottom(true).show(ui, |ui| {
+        let r = ui.add(
+            egui::TextEdit::multiline(text)
+                .id(id)
+                .hint_text(RichText::new(&b.hint).color(Tokens::get(ui.ctx()).text_faint))
+                .frame(egui::Frame::NONE.inner_margin(Margin::symmetric(4, pad_y.round() as i8)))
+                .desired_rows(b.rows.0)
+                .desired_width(f32::INFINITY)
+                .font(egui::FontId::proportional(b.font_size))
+                // Enter sends; Shift+Enter starts a new line.
+                .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))),
+        );
+        widgets::named(r.clone(), b.name);
+        if r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift) && !text.trim().is_empty() {
+            out.send = true;
+        }
+    });
 }
 
 /// The cursor is at this character, selecting nothing (or there's no text, or no cursor yet).
@@ -229,16 +270,11 @@ fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     cursor_to(ctx, id, text.chars().count());
 }
 
-/// Send: an app-colour square once there's something to send, a quiet one before.
+/// Send: a white (black in light) circle with an arrow once there's something to send, a dim
+/// one before.
 fn send_button(ui: &mut Ui, ready: bool) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(egui::Vec2::splat(32.0), egui::Sense::click());
-    let fill = if ready { crate::theme::mix(t.accent, egui::Color32::BLACK, 0.12 * widgets::hover_t(ui, &resp)) } else { t.raised };
-    ui.painter().rect_filled(rect, t.radius, fill);
-    icons::paint(ui, rect, "send", 16.0, if ready { egui::Color32::WHITE } else { t.text_faint });
-    widgets::focus_ring(ui, &resp, rect);
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("Send (Enter)")));
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tr("Send (Enter)"))
+    use crate::chat::{Glyph, Round};
+    crate::chat::round_button(ui, CONTROL, if ready { Round::Primary } else { Round::PrimaryDim }, Glyph::ArrowUp, "Send (Enter)")
 }
 
 /// "2 pictures attached" for the feed, or nothing.

@@ -1471,11 +1471,17 @@ impl CraftApp {
         self.tick(&ctx);
         self.shortcuts(&ctx);
         let t = theme::Tokens::get(&ctx);
-        // The title bar is on every screen: it is how the window moves, resizes and closes.
-        egui::Panel::top("titlebar").exact_size(titlebar::HEIGHT).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
-            guard_ui(ui, "title bar", |ui| titlebar::show(self, ui));
-        });
-        self.stuck_banner(ui, &ctx);
+        let sidebar_shown = self.settings.first_run_done && (self.beginner() || self.state.screen != Screen::Workbench);
+        // Windows and Linux: our title bar is on every screen, as it is how the window moves,
+        // resizes and closes. macOS: the system's window buttons sit over the sidebar, so the bar
+        // is only drawn where there is no sidebar to hold them.
+        let title_bar = !titlebar::NATIVE_CONTROLS || !sidebar_shown;
+        if title_bar {
+            egui::Panel::top("titlebar").exact_size(titlebar::HEIGHT).show_separator_line(false).frame(egui::Frame::new().fill(t.chrome)).show(ui, |ui| {
+                guard_ui(ui, "title bar", |ui| titlebar::show(self, ui));
+            });
+            self.stuck_banner(ui, &ctx);
+        }
         if !self.settings.first_run_done {
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| guard_ui(ui, "first run", |ui| first_run::show(self, ui)));
             titlebar::window_edge(&ctx);
@@ -1483,12 +1489,28 @@ impl CraftApp {
             return;
         }
 
-        if self.beginner() || self.state.screen != Screen::Workbench {
-            egui::Panel::left("app-sidebar")
+        if sidebar_shown {
+            // A lifted surface from the top of the window (under the title bar elsewhere), with
+            // a hairline on its right edge instead of a panel border.
+            let side = egui::Panel::left("app-sidebar")
                 .exact_size(sidebar::width(self, &ctx))
                 .resizable(false)
-                .frame(egui::Frame::new().fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0)))
+                .show_separator_line(false)
+                .frame(egui::Frame::new().fill(t.chrome).inner_margin(egui::Margin::symmetric(sidebar::PAD as i8, 0)))
                 .show(ui, |ui| guard_ui(ui, "sidebar", |ui| sidebar::show(self, ui)));
+            let edge = side.response.rect;
+            ui.painter().vline(edge.right() - 0.5, edge.y_range(), egui::Stroke::new(1.0, t.separator));
+            if !title_bar {
+                // macOS: the main area's top strip moves the window and holds what's open and the
+                // Clean room switch.
+                egui::Panel::top("main-top").exact_size(titlebar::MAIN_TOP).show_separator_line(false).frame(egui::Frame::new().fill(t.canvas)).show(
+                    ui,
+                    |ui| {
+                        guard_ui(ui, "top strip", |ui| titlebar::main_top(self, ui));
+                    },
+                );
+                self.stuck_banner(ui, &ctx);
+            }
             egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas)).show(ui, |ui| {
                 guard_ui(ui, "simple", |ui| match self.state.screen {
                     Screen::Home | Screen::Workbench => home::show(self, ui),
@@ -1537,18 +1559,19 @@ impl CraftApp {
         egui::Area::new(egui::Id::new("toasts")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -16.0)).show(ctx, |ui| {
             ui.set_width(width);
             for (i, (text, error)) in self.state.toasts.iter().enumerate() {
+                // A soft floating card: a hairline ring, coloured only for an error.
                 egui::Frame::new()
                     .fill(t.raised)
-                    .stroke(egui::Stroke::new(1.0, if *error { t.danger.gamma_multiply(0.6) } else { t.card_border }))
+                    .stroke(egui::Stroke::new(1.0, if *error { t.danger.gamma_multiply(0.6) } else { t.chrome_stroke }))
                     .corner_radius(t.r_lg())
-                    .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: t.shadow })
-                    .inner_margin(egui::Margin::symmetric(14, 8))
+                    .shadow(egui::Shadow { offset: [0, 8], blur: 32, spread: 0, color: t.shadow.gamma_multiply(0.7) })
+                    .inner_margin(egui::Margin { left: 16, right: 8, top: 8, bottom: 8 })
                     .show(ui, |ui| {
-                        ui.set_width(width - 28.0);
+                        ui.set_width(width - 24.0);
                         ui.horizontal(|ui| {
-                            let (icon, col) = if *error { ("triangle-alert", t.danger) } else { ("check", t.success) };
+                            let (icon, col) = if *error { ("triangle-alert", t.danger) } else { ("check", t.text_dim) };
                             icons::show(ui, icon, 15.0, col);
-                            ui.add(egui::Label::new(egui::RichText::new(text).color(if *error { t.text } else { t.text_dim })).wrap());
+                            ui.add(egui::Label::new(egui::RichText::new(text).color(t.text)).wrap());
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if icons::button(ui, "x", 28.0, false, "Dismiss").clicked() {
                                     dismiss = Some(i);

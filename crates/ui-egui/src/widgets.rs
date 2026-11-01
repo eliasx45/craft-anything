@@ -21,34 +21,46 @@ pub fn hover_t(ui: &Ui, resp: &Response) -> f32 {
     ui.ctx().animate_bool_with_time(resp.id.with("hover-t"), resp.hovered() || resp.has_focus(), 0.12)
 }
 
-/// The frame every text field uses: a field-coloured box with a 3:1 border and roomy padding.
+/// `t.text` at `alpha` (0..1): the see-through tint hover, press, chips and groups use, so it
+/// reads the same on any surface.
+pub fn tint(t: &Tokens, alpha: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(t.text.r(), t.text.g(), t.text.b(), (alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
+/// The frame every text field uses: a soft grey box, rounded, with a faint edge so it still
+/// shows on a panel of nearly the same grey, and roomy padding.
 pub fn text_field_frame(t: &Tokens) -> Frame {
-    Frame::new().fill(t.field).stroke(Stroke::new(1.0, t.field_border)).corner_radius(t.r()).inner_margin(Margin::symmetric(12, 10))
+    Frame::new().fill(t.field).stroke(Stroke::new(1.0, t.chrome_stroke)).corner_radius(t.r()).inner_margin(Margin::symmetric(12, 9))
 }
 
 /// The text-field frame for dense panels (filters, offsets, forms).
 pub fn text_field_frame_compact(t: &Tokens) -> Frame {
-    text_field_frame(t).inner_margin(Margin::symmetric(8, 6))
+    text_field_frame(t).inner_margin(Margin::symmetric(10, 6))
 }
 
-/// A switch with a label, in place of a checkbox. Flips `on` when clicked.
+/// A switch with a label, in place of a checkbox. Flips `on` when clicked. The track is a
+/// 34×20 capsule, grey when off and the accent when on; the knob slides across and turns
+/// from white to the colour drawn on the accent.
 pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
     let t = Tokens::get(ui.ctx());
+    const TRACK: Vec2 = Vec2::new(34.0, 20.0);
     // The label wraps to the room left, so a long one can't push a narrow panel wider.
-    let wrap = (ui.available_width() - 42.0).max(80.0);
+    let wrap = (ui.available_width() - TRACK.x - 10.0).max(80.0);
     let g = (!label.is_empty()).then(|| ui.painter().layout(tr(label), egui::FontId::proportional(theme::SMALL), t.text, wrap));
-    let w = 32.0 + g.as_ref().map_or(0.0, |g| g.size().x + 10.0);
-    let h = g.as_ref().map_or(24.0, |g| g.size().y.max(24.0));
+    let w = TRACK.x + g.as_ref().map_or(0.0, |g| g.size().x + 10.0);
+    let h = g.as_ref().map_or(TRACK.y + 4.0, |g| g.size().y.max(TRACK.y + 4.0));
     let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(w, h), Sense::click());
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
     let how = ui.ctx().animate_bool_with_time(resp.id, *on, 0.12);
-    let sw = egui::Rect::from_min_size(egui::pos2(rect.left(), rect.top() + 3.0), Vec2::new(32.0, 18.0));
-    ui.painter().rect(sw, 9.0, theme::mix(t.field, t.accent, how), Stroke::new(1.0, theme::mix(t.field_border, t.accent, how)), egui::StrokeKind::Inside);
-    let knob = egui::pos2(egui::lerp(sw.left() + 9.0..=sw.right() - 9.0, how), sw.center().y);
-    ui.painter().circle_filled(knob, 6.0, theme::mix(t.text_dim, Color32::WHITE, how));
+    let sw = egui::Rect::from_min_size(egui::pos2(rect.left(), rect.center().y - TRACK.y / 2.0), TRACK);
+    let off_track = theme::mix(t.secondary_fill, t.text, 0.06 * hover_t(ui, &resp));
+    ui.painter().rect_filled(sw, t.r_pill(), theme::mix(off_track, t.accent, how));
+    let knob = egui::pos2(egui::lerp(sw.left() + 10.0..=sw.right() - 10.0, how), sw.center().y);
+    let off_knob = if t.dark() { t.text } else { t.canvas };
+    ui.painter().circle_filled(knob, 8.0, theme::mix(off_knob, t.on_accent, how));
     if let Some(g) = g {
         ui.painter().galley(egui::pos2(sw.right() + 10.0, rect.center().y - g.size().y / 2.0), g, t.text);
     }
@@ -77,23 +89,18 @@ pub fn named(resp: Response, name: &str) -> Response {
     resp
 }
 
-/// A suggestion: a sentence in a hairline box that fills in a field when clicked. Wraps when
+/// A suggestion: a sentence on a soft grey chip that fills in a field when clicked. Wraps when
 /// it's wider than the space it has; fills the width in a justified layout (a tidy list).
 pub fn suggestion(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let max_w = ui.available_width().max(60.0);
-    let g = ui.painter().layout(tr(text), egui::FontId::proportional(theme::SMALL), t.text, max_w - 26.0);
-    let w = if ui.layout().horizontal_justify() { max_w } else { (g.size().x + 26.0).min(max_w) };
+    let g = ui.painter().layout(tr(text), egui::FontId::proportional(theme::SMALL), t.text, max_w - 28.0);
+    let w = if ui.layout().horizontal_justify() { max_w } else { (g.size().x + 28.0).min(max_w) };
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, (g.size().y + 14.0).max(32.0)), Sense::click());
     let h = hover_t(ui, &resp);
-    ui.painter().rect(
-        rect,
-        t.radius,
-        theme::mix(Color32::TRANSPARENT, t.hover, h),
-        Stroke::new(1.0, theme::mix(t.card_border, t.field_border, h)),
-        egui::StrokeKind::Inside,
-    );
-    let pos = egui::pos2(rect.left() + 13.0, rect.center().y - g.size().y / 2.0);
+    let alpha = if resp.is_pointer_button_down_on() { 0.14 } else { 0.05 + 0.04 * h };
+    ui.painter().rect_filled(rect, t.radius_lg, tint(&t, alpha));
+    let pos = egui::pos2(rect.left() + 14.0, rect.center().y - g.size().y / 2.0);
     ui.painter().galley_with_override_text_color(pos, g, theme::mix(t.text_dim, t.text, h));
     focus_ring(ui, &resp, rect);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr(text)));
@@ -101,8 +108,8 @@ pub fn suggestion(ui: &mut Ui, text: &str) -> Response {
 }
 
 /// A big, radio-like choice with an icon and plain words (and an optional line under them,
-/// empty for none); the chosen one is in the app colour with a tick (so it doesn't rely on
-/// colour alone). It grows taller when the words need it.
+/// empty for none); the chosen one is a stronger grey with a ring and a tick (so it doesn't
+/// rely on colour alone). It grows taller when the words need it.
 pub fn choice_tile(ui: &mut Ui, size: Vec2, icon: &str, label: &str, blurb: &str, on: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let wrap = size.x - 84.0;
@@ -111,14 +118,13 @@ pub fn choice_tile(ui: &mut Ui, size: Vec2, icon: &str, label: &str, blurb: &str
     let text_h = g.size().y + sub.as_ref().map_or(0.0, |s| s.size().y + 3.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(size.x, size.y.max(text_h + 24.0)), Sense::click());
     let h = hover_t(ui, &resp);
-    let (fill, stroke) = if on {
-        (t.accent_soft, Stroke::new(2.0, t.accent))
+    if on {
+        ui.painter().rect(rect, t.radius_lg, tint(&t, 0.12), Stroke::new(1.5, t.text), egui::StrokeKind::Inside);
     } else {
-        (theme::mix(Color32::TRANSPARENT, t.hover, h), Stroke::new(1.0, theme::mix(t.field_border, t.text_faint, h)))
-    };
-    ui.painter().rect(rect, t.radius, fill, stroke, egui::StrokeKind::Inside);
+        ui.painter().rect_filled(rect, t.radius_lg, tint(&t, 0.045 + 0.04 * h));
+    }
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 28.0, rect.center().y), Vec2::splat(24.0));
-    icons::paint(ui, icon_rect, icon, 22.0, if on { t.accent_ink } else { t.icon });
+    icons::paint(ui, icon_rect, icon, 22.0, if on { t.text } else { t.icon });
     let top = egui::pos2(icon_rect.right() + 12.0, rect.center().y - text_h / 2.0);
     let title_h = g.size().y;
     ui.painter().galley(top, g, t.text);
@@ -126,77 +132,96 @@ pub fn choice_tile(ui: &mut Ui, size: Vec2, icon: &str, label: &str, blurb: &str
         ui.painter().galley(top + Vec2::new(0.0, title_h + 3.0), s, t.text_dim);
     }
     if on {
-        icons::paint(ui, egui::Rect::from_center_size(egui::pos2(rect.right() - 20.0, rect.center().y), Vec2::splat(18.0)), "check", 18.0, t.accent_ink);
+        let c = egui::pos2(rect.right() - 22.0, rect.center().y);
+        ui.painter().circle_filled(c, 10.0, t.accent);
+        icons::paint(ui, egui::Rect::from_center_size(c, Vec2::splat(14.0)), "check", 13.0, t.on_accent);
     }
     focus_ring(ui, &resp, rect);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, on, tr(label)));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A visible keyboard-focus ring around `rect` when `resp` has focus (2 px accent, outside).
+/// A visible keyboard-focus ring around `rect` when `resp` has focus: 2 px in the secondary
+/// grey, just outside, following the shape's own rounding (pills stay pills).
 pub fn focus_ring(ui: &Ui, resp: &Response, rect: egui::Rect) {
     if resp.has_focus() {
         let t = Tokens::get(ui.ctx());
-        ui.painter().rect_stroke(rect.expand(2.0), t.radius + 2.0, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+        let r = (rect.height() / 2.0).min(t.radius_lg) + 2.0;
+        ui.painter().rect_stroke(rect.expand(2.0), r, Stroke::new(2.0, t.text_dim), egui::StrokeKind::Outside);
     }
 }
 
-/// A card frame: a soft rounded box with a hairline edge.
+/// A card frame: a soft rounded box a step above the page, with no edge.
 pub fn card(t: &Tokens) -> Frame {
-    Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(t.r_lg()).inner_margin(Margin::same(16))
+    Frame::new().fill(t.card).corner_radius(t.r_lg()).inner_margin(Margin::same(16))
 }
 
-/// A quieter, denser panel frame for the workbench.
+/// A card with no fill and a 1 px hairline edge, for lists that sit on a card-coloured panel.
+pub fn card_outlined(t: &Tokens) -> Frame {
+    Frame::new().stroke(Stroke::new(1.0, t.card_border)).corner_radius(t.r_lg()).inner_margin(Margin::same(16))
+}
+
+/// A quieter, denser panel frame for the workbench: a soft grey group, no edge.
 pub fn panel(t: &Tokens) -> Frame {
-    Frame::new().fill(t.card).stroke(Stroke::new(1.0, t.card_border)).corner_radius(t.r()).inner_margin(Margin::same(10))
+    Frame::new().fill(tint(t, if t.dark() { 0.045 } else { 0.04 })).corner_radius(t.r()).inner_margin(Margin::same(10))
 }
 
-/// The main action: an ink-filled button (light on dark in the dark theme).
+/// The main action: an accent-filled capsule (white with black words in the dark theme).
 pub fn primary(ui: &mut Ui, label: &str) -> Response {
     primary_icon(ui, None, label, true)
 }
 
 pub fn primary_icon(ui: &mut Ui, icon: Option<&str>, label: &str, enabled: bool) -> Response {
-    primary_sized(ui, icon, label, enabled, 32.0, 12.5)
+    primary_sized(ui, icon, label, enabled, BUTTON_H, 12.5)
+}
+
+/// Every capsule button is this tall unless asked otherwise.
+const BUTTON_H: f32 = 30.0;
+
+/// A button's words: semibold, a half point over the old label size (12.5 gives 13).
+fn button_galley(ui: &Ui, label: &str, size: f32) -> std::sync::Arc<egui::Galley> {
+    ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(size + 0.5), Color32::PLACEHOLDER)
+}
+
+/// How wide a capsule is: its contents, 14 either side, more for a bigger button.
+fn capsule_size(galley: &egui::Galley, icon: Option<&str>, height: f32) -> Vec2 {
+    let icon_w = if icon.is_some() { BUTTON_ICON_W } else { 0.0 };
+    let pad = 14.0 + ((height - BUTTON_H).max(0.0) * 0.5).round();
+    Vec2::new(galley.size().x + icon_w + pad * 2.0, (galley.size().y + 10.0).max(height))
 }
 
 /// The main button at a given height and label size (Simple mode's Start is a big one).
 pub fn primary_sized(ui: &mut Ui, icon: Option<&str>, label: &str, enabled: bool, height: f32, text: f32) -> Response {
     let t = Tokens::get(ui.ctx());
-    let galley = label_galley(ui, &tr(label), text, t.canvas);
-    let icon_w = if icon.is_some() { BUTTON_ICON_W } else { 0.0 };
-    let pad = ui.spacing().button_padding;
-    let size = Vec2::new(galley.size().x + icon_w + pad.x * 2.0 + 8.0 + (height - 32.0).max(0.0), (galley.size().y + pad.y * 2.0 + 8.0).max(height));
+    let galley = button_galley(ui, &tr(label), text);
+    let size = capsule_size(&galley, icon, height);
     let sense = if enabled { Sense::click() } else { Sense::hover() };
     let (rect, resp) = ui.allocate_exact_size(size, sense);
-    let fill = if !enabled {
-        t.pressed
+    let (fill, fg) = if !enabled {
+        (t.secondary_fill, t.text_faint)
     } else if resp.is_pointer_button_down_on() {
-        theme::mix(t.text, t.canvas, 0.25)
+        (theme::mix(t.accent, t.canvas, 0.15), t.on_accent)
     } else {
-        theme::mix(t.text, t.canvas, 0.14 * hover_t(ui, &resp))
+        (theme::mix(t.accent, t.accent_hover, hover_t(ui, &resp)), t.on_accent)
     };
-    ui.painter().rect_filled(rect, t.radius, fill);
-    let fg = if enabled { t.canvas } else { t.text_faint };
+    ui.painter().rect_filled(rect, t.r_pill(), fill);
     button_content(ui, rect, icon, galley, fg, fg);
     focus_ring(ui, &resp, rect);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, tr(label)));
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
 }
 
-/// Secondary button: a card-coloured box with a soft edge and an optional icon.
+/// Secondary button: a grey capsule (the secondary fill) with an optional icon; hovering and
+/// pressing lighten it.
 pub fn secondary(ui: &mut Ui, icon: Option<&str>, label: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    let galley = label_galley(ui, &tr(label), 12.0, t.text);
-    let icon_w = if icon.is_some() { BUTTON_ICON_W } else { 0.0 };
-    let pad = ui.spacing().button_padding;
-    let size = Vec2::new(galley.size().x + icon_w + pad.x * 2.0 + 6.0, (galley.size().y + pad.y * 2.0 + 6.0).max(30.0));
+    let galley = button_galley(ui, &tr(label), 12.5);
+    let size = capsule_size(&galley, icon, BUTTON_H);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let h = hover_t(ui, &resp);
-    let fill = if resp.is_pointer_button_down_on() { t.pressed } else { theme::mix(t.card, t.hover, h) };
-    let stroke = theme::mix(t.card_border, t.field_border, h);
-    ui.painter().rect(rect, t.radius, fill, Stroke::new(1.0, stroke), egui::StrokeKind::Inside);
-    button_content(ui, rect, icon, galley, t.text, t.icon);
+    let lift = if resp.is_pointer_button_down_on() { 0.14 } else { 0.08 * h };
+    ui.painter().rect_filled(rect, t.r_pill(), theme::mix(t.secondary_fill, t.text, lift));
+    button_content(ui, rect, icon, galley, t.text, t.text);
     focus_ring(ui, &resp, rect);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr(label)));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -213,7 +238,7 @@ fn button_content(ui: &Ui, rect: egui::Rect, icon: Option<&str>, galley: std::sy
     ui.painter().galley_with_override_text_color(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, fg);
 }
 
-/// A button icon (16 px) and the gap after it.
+/// A button icon (15 px in a 16 px box) and the 6 px gap after it.
 const BUTTON_ICON_W: f32 = 22.0;
 
 /// A borderless text button in the accent colour.
@@ -228,70 +253,77 @@ pub fn link(ui: &mut Ui, label: &str) -> Response {
     r
 }
 
-/// A segmented switch; the selected segment is a raised card on a sunken track. Returns the newly
-/// picked index when it changes.
+/// A segmented switch: a grey capsule track with the chosen option on a lighter capsule.
+/// Returns the newly picked index when it changes.
 pub fn segmented(ui: &mut Ui, options: &[&str], selected: usize, height: f32) -> Option<usize> {
     segmented_sized(ui, options, selected, height, 12.0)
 }
 
-/// [`segmented`] with a given label size (in the [`label_galley`] style), for a bigger switch.
+/// [`segmented`] with a given label size (medium weight), for a bigger switch.
 pub fn segmented_sized(ui: &mut Ui, options: &[&str], selected: usize, height: f32, text: f32) -> Option<usize> {
     let t = Tokens::get(ui.ctx());
-    let galleys: Vec<_> = options.iter().map(|o| label_galley(ui, &tr(o), text, t.text)).collect();
-    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + text * 2.0 + 2.0).collect();
-    let total: f32 = widths.iter().sum::<f32>() + 4.0;
+    const PAD: f32 = 3.0;
+    const GAP: f32 = 2.0;
+    let galleys: Vec<_> = options.iter().map(|o| ui.painter().layout_no_wrap(tr(o), theme::medium(text), t.text)).collect();
+    let widths: Vec<f32> = galleys.iter().map(|g| g.size().x + text * 2.0 + 4.0).collect();
+    let total: f32 = widths.iter().sum::<f32>() + PAD * 2.0 + GAP * widths.len().saturating_sub(1) as f32;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total, height), Sense::hover());
-    ui.painter().rect(rect, t.radius, t.raised, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
-    let mut x = rect.left() + 2.0;
+    ui.painter().rect_filled(rect, t.r_pill(), t.secondary_fill);
+    let mut x = rect.left() + PAD;
     let mut picked = None;
     for (i, (g, w)) in galleys.into_iter().zip(widths).enumerate() {
-        let seg = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 2.0), Vec2::new(w, height - 4.0));
+        let seg = egui::Rect::from_min_size(egui::pos2(x, rect.top() + PAD), Vec2::new(w, height - PAD * 2.0));
         let resp = ui.interact(seg, ui.id().with(("seg", options.get(i).copied().unwrap_or_default())), Sense::click());
         let on = i == selected;
         resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, tr(options.get(i).copied().unwrap_or_default())));
         if on {
-            ui.painter().rect(seg, t.radius_sm, t.card, Stroke::new(1.0, t.card_border), egui::StrokeKind::Inside);
+            if t.dark() {
+                ui.painter().rect_filled(seg, t.r_pill(), theme::mix(t.secondary_fill, t.text, 0.15));
+            } else {
+                ui.painter().add(egui::Shadow { offset: [0, 1], blur: 3, spread: 0, color: t.shadow }.as_shape(seg, t.r_pill()));
+                ui.painter().rect_filled(seg, t.r_pill(), t.canvas);
+            }
         } else {
-            ui.painter().rect_filled(seg, t.radius_sm, theme::mix(Color32::TRANSPARENT, t.hover, hover_t(ui, &resp)));
+            ui.painter().rect_filled(seg, t.r_pill(), tint(&t, 0.06 * hover_t(ui, &resp)));
         }
-        let color = if on { t.text } else { t.text_dim };
+        let color = if on { t.text } else { theme::mix(t.text_dim, t.text, hover_t(ui, &resp)) };
         ui.painter().galley_with_override_text_color(seg.center() - g.size() / 2.0, g, color);
         focus_ring(ui, &resp, seg);
         let resp = if on { resp } else { resp.on_hover_cursor(egui::CursorIcon::PointingHand) };
         if resp.clicked() && !on {
             picked = Some(i);
         }
-        x += w;
+        x += w + GAP;
     }
     picked
 }
 
-/// A small status label on a tint.
+/// A small status tag: a capsule on a tint.
 pub fn pill(ui: &mut Ui, text: &str, fg: Color32, bg: Color32) -> Response {
     let t = Tokens::get(ui.ctx());
     let label = tr(text);
-    let g = label_galley(ui, &label, 11.0, fg);
-    let size = Vec2::new(g.size().x + 14.0, g.size().y + 8.0);
+    let g = ui.painter().layout_no_wrap(label.clone(), theme::medium(theme::TINY), fg);
+    let size = Vec2::new((g.size().x + 14.0).max(18.0), (g.size().y + 4.0).max(18.0));
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect_filled(rect, t.r_sm(), bg);
+    ui.painter().rect_filled(rect, t.r_pill(), bg);
     ui.painter().galley_with_override_text_color(rect.center() - g.size() / 2.0, g, fg);
     // Painted text: say it to screen readers too.
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
     resp
 }
 
-/// The "how sure are we" badge: a coloured dot and the plain label.
+/// The "how sure are we" badge: a coloured dot and the plain label on a capsule of its tint.
 pub fn confidence_badge(ui: &mut Ui, c: Option<Confidence>) -> Response {
     let t = Tokens::get(ui.ctx());
     let col = confidence_color(c);
-    let font = theme::medium(theme::CAPTION);
+    let font = theme::medium(theme::TINY);
     let g = ui.painter().layout_no_wrap(tr(confidence_label(c)), font, col);
-    let size = Vec2::new(g.size().x + 26.0, g.size().y + 7.0);
+    let size = Vec2::new(g.size().x + 26.0, (g.size().y + 6.0).max(20.0));
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
-    let bg = Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 34);
-    ui.painter().rect(rect, t.r_sm(), bg, Stroke::new(1.0, col.gamma_multiply(0.45)), egui::StrokeKind::Inside);
-    ui.painter().circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.5, col);
-    ui.painter().galley_with_override_text_color(egui::pos2(rect.left() + 18.0, rect.center().y - g.size().y / 2.0), g, col);
+    let bg = Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), if t.dark() { 30 } else { 26 });
+    ui.painter().rect_filled(rect, t.r_pill(), bg);
+    ui.painter().circle_filled(egui::pos2(rect.left() + 10.0, rect.center().y), 3.0, col);
+    ui.painter().galley_with_override_text_color(egui::pos2(rect.left() + 17.0, rect.center().y - g.size().y / 2.0), g, col);
     let tip = match c {
         Some(Confidence::Observed) => "Seen it: read directly from the file, page or capture.",
         Some(Confidence::Derived) => "Worked it out: computed step by step from things we saw.",
@@ -301,10 +333,10 @@ pub fn confidence_badge(ui: &mut Ui, c: Option<Confidence>) -> Response {
     resp.on_hover_text(tr(tip))
 }
 
-/// A section caption in the label style, faint.
+/// A section caption: a short medium-weight label, faint.
 pub fn caption(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    ui.label(theme::label_text(&tr(text), 12.0).color(t.text_faint));
+    ui.label(RichText::new(tr(text)).font(theme::medium(theme::CAPTION + 0.5)).color(t.text_faint));
 }
 
 /// A centred, calm empty state.
@@ -313,44 +345,43 @@ pub fn empty_state(ui: &mut Ui, icon: &str, title: &str, body: &str) {
     ui.vertical_centered(|ui| {
         ui.add_space(18.0);
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
-        ui.painter().circle_filled(rect.center(), 22.0, t.raised);
-        icons::paint(ui, rect, icon, 22.0, t.text_faint);
-        ui.add_space(6.0);
-        ui.label(RichText::new(tr(title)).font(theme::medium(theme::SMALL)).color(t.text_dim));
+        ui.painter().circle_filled(rect.center(), 22.0, tint(&t, 0.06));
+        icons::paint(ui, rect, icon, 20.0, t.text_faint);
+        ui.add_space(8.0);
+        ui.label(RichText::new(tr(title)).font(theme::semibold(theme::BODY)).color(t.text));
         if !body.is_empty() {
-            ui.label(RichText::new(tr(body)).color(t.text_faint).size(theme::CAPTION));
+            ui.add_space(2.0);
+            ui.label(RichText::new(tr(body)).color(t.text_dim).size(theme::SMALL));
         }
         ui.add_space(12.0);
     });
 }
 
-/// A big clickable card with an icon, title and blurb (Beginner Home).
+/// A big clickable card with an icon, title and blurb (Beginner Home). No edge: hovering lifts
+/// its grey a step.
 pub fn big_card(ui: &mut Ui, size: Vec2, icon: &str, title: &str, blurb: &str, badge: Option<&str>) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    let hovered = resp.hovered();
-    let fill = t.card;
-    let stroke = Stroke::new(1.0, if hovered { t.field_border } else { t.card_border });
-    if hovered {
-        ui.painter().add(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: t.shadow }.as_shape(rect, t.r_lg()));
-    }
-    ui.painter().rect(rect, t.radius_lg, fill, stroke, egui::StrokeKind::Inside);
-    let icon_rect = egui::Rect::from_min_size(rect.min + Vec2::new(22.0, 22.0), Vec2::splat(52.0));
-    ui.painter().rect_filled(icon_rect, t.radius, t.accent_soft);
-    icons::paint(ui, icon_rect, icon, 28.0, t.accent_ink);
+    let h = hover_t(ui, &resp);
+    let fill = if resp.is_pointer_button_down_on() { theme::mix(t.card, t.text, 0.08) } else { theme::mix(t.card, t.raised, h) };
+    ui.painter().rect_filled(rect, t.radius_lg, fill);
+    let icon_rect = egui::Rect::from_min_size(rect.min + Vec2::new(22.0, 22.0), Vec2::splat(48.0));
+    ui.painter().rect_filled(icon_rect, t.radius, tint(&t, 0.08));
+    icons::paint(ui, icon_rect, icon, 24.0, t.text);
     if let Some(b) = badge {
         let g = ui.painter().layout_no_wrap(tr(b), theme::medium(theme::TINY), t.text_dim);
-        let br = egui::Rect::from_min_size(egui::pos2(rect.right() - g.size().x - 34.0, rect.top() + 22.0), g.size() + Vec2::new(16.0, 8.0));
-        ui.painter().rect_filled(br, t.r_sm(), t.hover);
+        let br = egui::Rect::from_min_size(egui::pos2(rect.right() - g.size().x - 36.0, rect.top() + 22.0), g.size() + Vec2::new(14.0, 4.0));
+        let br = br.expand2(Vec2::new(0.0, ((18.0 - br.height()) / 2.0).max(0.0)));
+        ui.painter().rect_filled(br, t.r_pill(), tint(&t, 0.08));
         ui.painter().galley_with_override_text_color(br.center() - g.size() / 2.0, g, t.text_dim);
     }
     let title_pos = egui::pos2(rect.left() + 22.0, icon_rect.bottom() + 18.0);
-    // Titles wrap: the display face is wide, and translations are longer.
-    let title_g = theme::heading_galley(ui.painter(), tr(title), theme::CARD, t.text, rect.width() - 44.0);
+    // Titles wrap: translations are longer.
+    let title_g = theme::heading_galley(ui.painter(), tr(title), theme::CARD + 1.0, t.text, rect.width() - 44.0);
     let title_h = title_g.size().y;
     ui.painter().galley(title_pos, title_g, t.text);
     let wrap = ui.painter().layout(tr(blurb), egui::FontId::proportional(theme::SMALL), t.text_dim, rect.width() - 44.0);
-    ui.painter().galley(title_pos + Vec2::new(0.0, title_h + 8.0), wrap, t.text_dim);
+    ui.painter().galley(title_pos + Vec2::new(0.0, title_h + 6.0), wrap, t.text_dim);
     focus_ring(ui, &resp, rect);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr(title)));
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -364,7 +395,7 @@ pub fn glossary_word(ui: &mut Ui, word: &str, meaning: &str, font: egui::FontId)
     let mut x = resp.rect.left();
     let trimmed_right = resp.rect.right() - if word.ends_with(' ') { 4.0 } else { 0.0 };
     while x < trimmed_right {
-        ui.painter().hline(x..=(x + 2.0).min(trimmed_right), y, Stroke::new(1.0, t.accent));
+        ui.painter().hline(x..=(x + 2.0).min(trimmed_right), y, Stroke::new(1.0, t.text_faint));
         x += 4.0;
     }
     resp.on_hover_ui(|ui| {
@@ -391,7 +422,7 @@ pub fn thinking(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(36.0, 14.0), Sense::hover());
     for i in 0..3 {
         let phase = ((time * 3.0 - i as f64 * 0.5).sin() * 0.5 + 0.5) as f32;
-        let c = t.accent.gamma_multiply(0.35 + 0.65 * phase);
+        let c = theme::mix(t.text_faint, t.text, phase).gamma_multiply(0.45 + 0.55 * phase);
         ui.painter().circle_filled(egui::pos2(rect.left() + 6.0 + i as f32 * 12.0, rect.center().y), 3.5, c);
     }
     animate(ui, FRAME);
@@ -443,7 +474,7 @@ pub fn working_since(ui: &mut Ui, title: &str, detail: Option<&str>, began: Opti
         ui.horizontal(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
             let (c, radius) = (r.center(), 9.0);
-            ui.painter().circle_stroke(c, radius, Stroke::new(2.5, t.separator));
+            ui.painter().circle_stroke(c, radius, Stroke::new(2.5, tint(&t, 0.12)));
             let start = (now * 4.0) as f32;
             let sweep = std::f32::consts::PI * (0.9 + 0.5 * (now * 1.7).sin() as f32);
             let arc = (0..=20).map(|i| c + radius * Vec2::angled(start + sweep * i as f32 / 20.0)).collect();
@@ -463,7 +494,7 @@ pub fn working_since(ui: &mut Ui, title: &str, detail: Option<&str>, began: Opti
         // An indeterminate sweep along the bottom: movement even when nothing new has arrived.
         ui.add_space(10.0);
         let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 2.0), Sense::hover());
-        ui.painter().rect_filled(bar, 1.0, t.separator);
+        ui.painter().rect_filled(bar, 1.0, tint(&t, 0.08));
         let seg = bar.width() * 0.25;
         let x = bar.left() - seg + (bar.width() + seg) * ((now * 0.6).fract() as f32);
         let lit = egui::Rect::from_x_y_ranges(x.max(bar.left())..=(x + seg).min(bar.right()), bar.y_range());

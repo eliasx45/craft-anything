@@ -7,7 +7,7 @@ use crate::state::Modal;
 use crate::theme::{self, Tokens};
 use crate::{CraftApp, icons, widgets};
 use craft_anything_ai::{BackendConfig, BackendKind};
-use egui::{RichText, Ui, Vec2};
+use egui::{RichText, Ui};
 
 /// One AI that could build.
 #[derive(Debug, Clone, PartialEq)]
@@ -116,8 +116,8 @@ pub fn built_by(app: &mut CraftApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(default) = app.default_builder() else {
         icons::show(ui, "triangle-alert", 16.0, t.warning);
-        ui.label(RichText::new(tr("Building needs a coding agent such as Claude Code, or an AI with an API key.")).size(theme::BODY).color(t.text_dim));
-        if widgets::link(ui, "Set one up").clicked() {
+        ui.label(RichText::new(tr("Building needs a coding agent such as Claude Code, or an AI with an API key.")).size(theme::SMALL).color(t.text_dim));
+        if crate::make::quiet_link(ui, "Set one up").clicked() {
             app.need_builder(false);
         }
         return;
@@ -129,8 +129,10 @@ pub fn built_by(app: &mut CraftApp, ui: &mut Ui) {
     }
     let automatic = trf("Automatic ({name})", &[("name", &default)]);
     let shown = app.state.make.ai.clone().unwrap_or_else(|| automatic.clone());
-    ui.label(RichText::new(tr("Built by")).size(theme::BODY).color(t.text_dim));
+    ui.label(RichText::new(tr("Built by")).size(theme::SMALL).color(t.text_dim));
     let mut pick = None;
+    crate::make::pill_combos(ui);
+    let shown = RichText::new(shown).size(theme::SMALL).color(t.text);
     let r = egui::ComboBox::from_id_salt("built-by").icon(widgets::combo_icon).selected_text(shown).width(220.0).show_ui(ui, |ui| {
         if ui.selectable_label(app.state.make.ai.is_none(), automatic).on_hover_text(tr("Whatever Settings → AI builds with.")).clicked() {
             pick = Some(None);
@@ -153,12 +155,12 @@ pub fn built_by(app: &mut CraftApp, ui: &mut Ui) {
 pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &mut bool) {
     let t = Tokens::get(ui.ctx());
     ui.set_width(520.0);
-    ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover());
-        ui.painter().rect_filled(rect, t.radius, t.accent_soft);
-        icons::paint(ui, rect, "bot", 24.0, t.accent_ink);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 14.0;
+        crate::home::dialog_icon(ui, "bot", t.text);
         ui.vertical(|ui| {
-            ui.label(theme::heading(tr("Set up a builder"), theme::CARD));
+            ui.label(theme::heading(tr("Set up a builder"), crate::home::DIALOG_TITLE));
+            ui.add_space(4.0);
             ui.add(
                 egui::Label::new(
                     RichText::new(tr(
@@ -181,10 +183,10 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
         ui.label(RichText::new(tr("No coding agent was found on this computer yet.")).color(t.text_dim));
     }
     for b in found {
-        widgets::panel(&t).show(ui, |ui| {
+        crate::make::soft_card(&t).inner_margin(egui::Margin::symmetric(16, 12)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                icons::show(ui, "bot", 18.0, t.accent);
+                icons::show(ui, "bot", 18.0, t.text);
                 ui.vertical(|ui| {
                     ui.label(RichText::new(&b.name).font(theme::semibold(theme::SMALL)));
                     ui.label(RichText::new(tr("Found on this computer")).color(t.text_faint).size(theme::CAPTION));
@@ -205,8 +207,9 @@ pub fn need_builder_modal(app: &mut CraftApp, ui: &mut Ui, start: bool, close: &
         });
         ui.add_space(6.0);
     }
-    ui.add_space(10.0);
+    ui.add_space(14.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if !app.detecting && widgets::secondary(ui, Some("radar"), "Look again").on_hover_text(tr("After installing one, look for it again.")).clicked() {
             app.detect_backends();
         }

@@ -53,24 +53,48 @@ pub fn show(ui: &mut egui::Ui, name: &str, size: f32, tint: Color32) -> Response
     resp
 }
 
-/// Square icon button: transparent until hovered; `selected` gets the accent treatment.
+/// Square icon button, rounded at 0.28 of its size: transparent with a grey glyph at rest; a
+/// faint tint on hover (the glyph brightens), a stronger one on press. `selected` keeps a tint
+/// and the bright glyph.
 pub fn button(ui: &mut egui::Ui, name: &str, box_size: f32, selected: bool, tooltip: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(box_size), Sense::click());
-    if selected {
-        ui.painter().rect_filled(rect, t.radius_sm, t.accent_soft);
+    let h = crate::widgets::hover_t(ui, &resp);
+    let alpha = if resp.is_pointer_button_down_on() {
+        0.14
+    } else if selected {
+        0.12 + 0.03 * h
     } else {
-        let h = crate::widgets::hover_t(ui, &resp);
-        ui.painter().rect_filled(rect, t.radius_sm, crate::theme::mix(Color32::TRANSPARENT, t.hover, h));
-    }
-    let tint = if selected {
-        t.accent_ink
-    } else if resp.hovered() {
-        t.text
-    } else {
-        t.icon
+        0.08 * h
     };
-    paint(ui, rect, name, (box_size * 0.55).round(), tint);
+    if alpha > 0.0 {
+        ui.painter().rect_filled(rect, (box_size * 0.28).round(), crate::widgets::tint(&t, alpha));
+    }
+    let glyph = if selected { t.text } else { crate::theme::mix(t.icon, t.text, h) };
+    paint(ui, rect, name, glyph_size(box_size), glyph);
+    finish(ui, resp, rect, name, tooltip)
+}
+
+/// A round icon button with a faint ring (header and chrome actions): transparent, the glyph
+/// in the text colour, a light tint on hover and a stronger one on press.
+pub fn button_circle(ui: &mut egui::Ui, name: &str, box_size: f32, tooltip: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(box_size), Sense::click());
+    let h = crate::widgets::hover_t(ui, &resp);
+    let alpha = if resp.is_pointer_button_down_on() { 0.12 } else { 0.05 * h };
+    let fill = if alpha > 0.0 { crate::widgets::tint(&t, alpha) } else { Color32::TRANSPARENT };
+    ui.painter().circle(rect.center(), box_size / 2.0 - 0.5, fill, egui::Stroke::new(1.0, t.chrome_stroke));
+    paint(ui, rect, name, glyph_size(box_size), t.text);
+    finish(ui, resp, rect, name, tooltip)
+}
+
+/// Glyphs are half their button (rounded, never under 12 px).
+fn glyph_size(box_size: f32) -> f32 {
+    (box_size * 0.5).round().max(12.0)
+}
+
+/// What every icon button ends with: focus ring, pointer, a name for screen readers, tooltip.
+fn finish(ui: &egui::Ui, resp: Response, rect: Rect, name: &str, tooltip: &str) -> Response {
     crate::widgets::focus_ring(ui, &resp, rect);
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, crate::i18n::tr(if tooltip.is_empty() { name } else { tooltip })));

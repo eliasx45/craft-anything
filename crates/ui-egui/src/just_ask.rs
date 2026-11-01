@@ -135,7 +135,7 @@ impl CraftApp {
 /// scrolling the conversation, so it never pushes the prompt box off the screen.
 pub fn card(ui: &mut Ui, a: &mut Asked, glossary: bool) {
     let t = Tokens::get(ui.ctx());
-    let shown = widgets::card(&t).show(ui, |ui| {
+    let shown = chat::notice(&t, None).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let mut toggle = false;
         ui.horizontal(|ui| {
@@ -176,7 +176,7 @@ pub fn card(ui: &mut Ui, a: &mut Asked, glossary: bool) {
         // Its start, not the end of a long answer.
         ui.scroll_to_rect(shown.response.rect, Some(egui::Align::Min));
     }
-    ui.add_space(chat::MESSAGE_GAP);
+    ui.add_space(chat::NEW_SPEAKER_GAP);
 }
 
 #[cfg(test)]

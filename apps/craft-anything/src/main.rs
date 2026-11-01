@@ -30,15 +30,14 @@ fn main() -> eframe::Result {
     let hub = Arc::new(AiHub::new(engine.clone()));
     log::info!("engine and AI ready; opening the window");
 
-    let mut viewport = eframe::egui::ViewportBuilder::default()
+    let viewport = eframe::egui::ViewportBuilder::default()
         .with_title("Craft Anything")
         .with_app_id("ai.storyteller.craft-anything")
         .with_inner_size([1360.0, 860.0])
         .with_min_inner_size([760.0, 520.0])
-        // Our own title bar draws the window controls, moves and resizes the window.
-        .with_decorations(false)
         .with_resizable(true)
         .with_drag_and_drop(true);
+    let mut viewport = window_frame(viewport);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(craft_anything_ui_egui::APP_ICON_PNG) {
         viewport = viewport.with_icon(Arc::new(icon));
     }
@@ -67,6 +66,21 @@ fn main() -> eframe::Result {
         Err(e) => log::error!("the window couldn't start: {e}"),
     }
     run
+}
+
+/// macOS: the system's frame, with its window buttons over our content. The title bar is see-through
+/// and untitled, and the content runs under it, so the sidebar reaches the top of the window
+/// (`craft_anything_ui_egui::titlebar::NATIVE_CONTROLS`).
+#[cfg(target_os = "macos")]
+fn window_frame(viewport: eframe::egui::ViewportBuilder) -> eframe::egui::ViewportBuilder {
+    viewport.with_decorations(true).with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false)
+}
+
+/// Windows and Linux: no native frame; our own title bar draws the window controls, moves and
+/// resizes the window.
+#[cfg(not(target_os = "macos"))]
+fn window_frame(viewport: eframe::egui::ViewportBuilder) -> eframe::egui::ViewportBuilder {
+    viewport.with_decorations(false)
 }
 
 /// Windows: the adapter that draws the window. GL comes after every other one, Windows' own

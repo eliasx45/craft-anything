@@ -10,25 +10,17 @@ use serde_json::Value;
 /// A proof card: summary + confidence up top, the details behind an expander.
 pub fn proof_card(ui: &mut Ui, e: &Evidence, dense: bool, open: bool) {
     let t = Tokens::get(ui.ctx());
-    let col = confidence_color(Some(e.confidence));
-    let frame = egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.0, t.card_border)).corner_radius(t.r_lg()).inner_margin(Margin::same(if dense {
-        10
-    } else {
-        14
-    }));
+    let frame = egui::Frame::new().fill(t.card).corner_radius(t.r_lg()).inner_margin(Margin::same(if dense { 10 } else { 14 }));
     frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
-        // A thin confidence stripe on the left edge.
-        let r = ui.max_rect();
-        ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(r.left() - 8.0, r.top() + 2.0), egui::pos2(r.left() - 5.0, r.bottom() - 2.0)), 2.0, col);
         ui.horizontal(|ui| {
             widgets::confidence_badge(ui, Some(e.confidence));
             ui.label(RichText::new(nice_operation(&e.operation)).font(theme::medium(theme::CAPTION)).color(t.text_dim));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if e.environment.clean_room {
-                    widgets::pill(ui, "Clean room", t.success, t.raised).on_hover_text(tr("Made without looking inside the original."));
+                    widgets::pill(ui, "Clean room", t.success, widgets::tint(&t, 0.07)).on_hover_text(tr("Made without looking inside the original."));
                 } else {
-                    widgets::pill(ui, &e.environment.engine, t.accent_ink, t.accent_soft);
+                    widgets::pill(ui, &e.environment.engine, t.text_dim, widgets::tint(&t, 0.07));
                 }
             });
         });
@@ -56,7 +48,7 @@ fn details(ui: &mut Ui, e: &Evidence, t: &Tokens) {
                     Some(lbl) => format!("{lbl}  {}", l.value),
                     None => l.value.clone(),
                 };
-                egui::Frame::new().fill(t.raised).corner_radius(t.r_sm()).inner_margin(Margin::symmetric(8, 3)).show(ui, |ui| {
+                egui::Frame::new().fill(widgets::tint(t, 0.07)).corner_radius(t.r_pill()).inner_margin(Margin::symmetric(9, 3)).show(ui, |ui| {
                     ui.label(RichText::new(text).font(theme::mono(11.5)).color(t.text)).on_hover_text(&l.kind);
                 });
             }
@@ -204,11 +196,10 @@ pub fn truncate(s: &str, max: usize) -> String {
 pub fn ledger_row(ui: &mut Ui, e: &Evidence, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let col = confidence_color(Some(e.confidence));
-    let resp = egui::Frame::new()
-        .fill(if selected { t.accent_soft } else { t.card })
-        .corner_radius(t.r_sm())
-        .inner_margin(Margin::symmetric(8, 6))
-        .show(ui, |ui| {
+    let mut frame = egui::Frame::new().corner_radius(t.r()).inner_margin(Margin::symmetric(10, 8)).begin(ui);
+    {
+        let ui = &mut frame.content_ui;
+        {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
@@ -219,13 +210,20 @@ pub fn ledger_row(ui: &mut Ui, e: &Evidence, selected: bool) -> bool {
                 });
             });
             ui.add(egui::Label::new(RichText::new(truncate(&e.summary, 160)).size(theme::CAPTION).color(t.text_dim)).wrap());
-        })
-        .response;
-    let resp = resp.interact(egui::Sense::click());
-    if resp.hovered() && !selected {
-        ui.painter().rect_stroke(resp.rect, t.radius_sm, egui::Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
+        }
     }
-    resp.clicked()
+    // A row on the panel: no fill at rest, the hover grey under the pointer, the chosen-row grey
+    // when picked.
+    let resp = frame.allocate_space(ui).interact(egui::Sense::click());
+    frame.frame.fill = if selected {
+        t.selected_row
+    } else if resp.hovered() {
+        t.hover
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    frame.paint(ui);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
 #[cfg(test)]

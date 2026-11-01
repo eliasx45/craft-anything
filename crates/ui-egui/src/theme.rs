@@ -1,8 +1,8 @@
 //! Design system: two themes (Studio dark, Studio Light), colour tokens, radii and type.
 //!
 //! A calm desktop look: neutral graphite (or near-white) surfaces, a slightly darker sidebar,
-//! soft rounded cards and controls, sentence-case DM Sans throughout, and ink-filled main buttons.
-//! Indigo is the app colour for highlights, progress, links and selection.
+//! soft rounded cards and controls, sentence-case Inter throughout, and ink-filled main buttons.
+//! Monochrome: grey fills step up in small increments and white (black in light) is the accent.
 //! Widgets read [`Tokens::get`] instead of hard-coding colours, so a theme switch applies everywhere.
 //! Confidence has its own fixed palette so "how sure are we" reads the same in both themes.
 
@@ -78,13 +78,31 @@ pub struct Tokens {
     pub warning: Color32,
     pub success: Color32,
     pub code_bg: Color32,
+    /// The person's own messages.
+    pub bubble_user: Color32,
+    /// The app's and the builder's messages.
+    pub bubble_agent: Color32,
+    /// The floating prompt box.
+    pub composer: Color32,
+    /// Round controls inside the prompt box (attach, voice).
+    pub composer_control: Color32,
+    /// Floating chrome pills (the project title at the top of the feed).
+    pub pill_fill: Color32,
+    /// Hairline ring around outlined chrome (round header buttons, footer pills).
+    pub chrome_stroke: Color32,
+    /// Secondary buttons, switches that are off, avatar placeholders.
+    pub secondary_fill: Color32,
+    /// The chosen row in a list (the open project in the sidebar).
+    pub selected_row: Color32,
     pub radius_sm: f32,
     pub radius: f32,
     pub radius_lg: f32,
+    /// Floating surfaces: the prompt box, dialogs and sheets.
+    pub radius_xl: f32,
 }
 
-/// The app colour: getartcraft.com's deep accent (#1659c4). White on it passes WCAG AA; on its
-/// bright accent (#2d81ff, used for hover) it doesn't.
+/// The old app colour, kept for the web viewer and the confidence palette's neighbours. The
+/// desktop themes are monochrome: their accent is white (dark) or black (light).
 pub const BRAND: Color32 = Color32::from_rgb(0x16, 0x59, 0xc4);
 
 pub const SEEN_IT: Color32 = Color32::from_rgb(0x3f, 0xb2, 0x7f);
@@ -109,69 +127,86 @@ pub fn confidence_label(c: Option<Confidence>) -> &'static str {
 impl Tokens {
     pub fn for_kind(kind: ThemeKind) -> Self {
         match kind {
-            // getartcraft.com's dark: warm near-black (#121316), its #101014 for the sidebar, cards
-            // and controls its warm ink (#f2f1ee) laid over the background at 4-15%.
+            // Monochrome dark: a near-black reading surface, a slightly lifted sidebar, grey fills
+            // stepping up in small increments, and white as the only accent.
             ThemeKind::Studio => Tokens {
                 kind,
-                chrome: Color32::from_rgb(0x10, 0x10, 0x14),
-                canvas: Color32::from_rgb(0x12, 0x13, 0x16),
-                card: Color32::from_rgb(0x1b, 0x1c, 0x1f),
-                card_border: Color32::from_rgb(0x34, 0x34, 0x36),
-                raised: Color32::from_rgb(0x22, 0x23, 0x25),
-                field: Color32::from_rgb(0x1b, 0x1c, 0x1f),
-                field_border: Color32::from_rgb(0x6c, 0x6c, 0x6c),
-                hover: Color32::from_rgb(0x22, 0x23, 0x25),
-                pressed: Color32::from_rgb(0x2d, 0x2e, 0x30),
-                text: Color32::from_rgb(0xf2, 0xf1, 0xee),
-                text_dim: Color32::from_rgb(0xb3, 0xb3, 0xb2),
-                text_faint: Color32::from_rgb(0x8d, 0x8d, 0x8d),
-                icon: Color32::from_rgb(0xa8, 0xa8, 0xa6),
-                accent: BRAND,
-                accent_hover: Color32::from_rgb(0x2d, 0x81, 0xff),
-                accent_ink: Color32::from_rgb(0x74, 0xaa, 0xff),
-                accent_soft: Color32::from_rgba_unmultiplied(0x2d, 0x81, 0xff, 44),
-                on_accent: Color32::WHITE,
-                separator: Color32::from_rgb(0x24, 0x25, 0x27),
-                shadow: Color32::from_black_alpha(120),
-                danger: Color32::from_rgb(0xff, 0x62, 0x59),
-                warning: BEST_GUESS,
-                success: Color32::from_rgb(0x5b, 0xbf, 0x8f),
-                code_bg: Color32::from_rgb(0x06, 0x06, 0x07),
-                radius_sm: 6.0,
-                radius: 8.0,
-                radius_lg: 12.0,
+                chrome: Color32::from_rgb(0x11, 0x11, 0x11),
+                canvas: Color32::from_rgb(0x07, 0x07, 0x07),
+                card: Color32::from_rgb(0x11, 0x11, 0x11),
+                card_border: Color32::from_rgb(0x26, 0x26, 0x26),
+                raised: Color32::from_rgb(0x1c, 0x1c, 0x1c),
+                field: Color32::from_rgb(0x19, 0x19, 0x19),
+                field_border: Color32::from_rgb(0x63, 0x63, 0x63),
+                hover: Color32::from_rgb(0x1c, 0x1c, 0x1c),
+                pressed: Color32::from_rgb(0x29, 0x29, 0x29),
+                text: Color32::from_rgb(0xfa, 0xfa, 0xfa),
+                text_dim: Color32::from_rgb(0xa0, 0xa0, 0xa0),
+                text_faint: Color32::from_rgb(0x9a, 0x9a, 0x9a),
+                icon: Color32::from_rgb(0xa0, 0xa0, 0xa0),
+                accent: Color32::from_rgb(0xf5, 0xf5, 0xf5),
+                accent_hover: Color32::WHITE,
+                accent_ink: Color32::from_rgb(0xfa, 0xfa, 0xfa),
+                accent_soft: Color32::from_rgba_unmultiplied(0xfa, 0xfa, 0xfa, 26),
+                on_accent: Color32::BLACK,
+                separator: Color32::from_rgb(0x26, 0x26, 0x26),
+                shadow: Color32::from_black_alpha(110),
+                danger: Color32::from_rgb(0xf0, 0xa7, 0xa7),
+                warning: Color32::from_rgb(0xec, 0xaf, 0x52),
+                success: Color32::from_rgb(0x8f, 0xd1, 0x8b),
+                code_bg: Color32::from_rgb(0x11, 0x11, 0x11),
+                bubble_user: Color32::from_rgb(0x36, 0x36, 0x36),
+                bubble_agent: Color32::from_rgb(0x26, 0x26, 0x26),
+                composer: Color32::from_rgb(0x2f, 0x2f, 0x2f),
+                composer_control: Color32::from_rgb(0x41, 0x41, 0x41),
+                pill_fill: Color32::from_rgb(0x18, 0x18, 0x18),
+                chrome_stroke: Color32::from_rgba_unmultiplied(0xff, 0xff, 0xff, 26),
+                secondary_fill: Color32::from_rgb(0x3a, 0x3a, 0x3a),
+                selected_row: Color32::from_rgb(0x29, 0x29, 0x29),
+                radius_sm: 10.0,
+                radius: 12.0,
+                radius_lg: 16.0,
+                radius_xl: 22.0,
             },
-            // getartcraft.com's light: warm paper (#f2f1ee), its sunken #e9e8e4 for the sidebar,
-            // raised #faf9f7 for cards, ink #101014.
+            // Monochrome light: white reading surface, a soft grey sidebar, black as the accent.
             ThemeKind::StudioLight => Tokens {
                 kind,
-                chrome: Color32::from_rgb(0xe9, 0xe8, 0xe4),
-                canvas: Color32::from_rgb(0xf2, 0xf1, 0xee),
-                card: Color32::from_rgb(0xfa, 0xf9, 0xf7),
-                card_border: Color32::from_rgb(0xce, 0xcd, 0xcb),
-                raised: Color32::from_rgb(0xe9, 0xe8, 0xe4),
-                field: Color32::from_rgb(0xfa, 0xf9, 0xf7),
-                field_border: Color32::from_rgb(0x86, 0x85, 0x85),
-                hover: Color32::from_rgb(0xe4, 0xe4, 0xe1),
-                pressed: Color32::from_rgb(0xdb, 0xda, 0xd8),
-                text: Color32::from_rgb(0x10, 0x10, 0x14),
-                text_dim: Color32::from_rgb(0x3d, 0x3d, 0x40),
-                text_faint: Color32::from_rgb(0x5d, 0x5c, 0x5e),
-                icon: Color32::from_rgb(0x4f, 0x4f, 0x52),
-                accent: BRAND,
-                accent_hover: Color32::from_rgb(0x2d, 0x81, 0xff),
-                accent_ink: BRAND,
-                accent_soft: Color32::from_rgba_unmultiplied(0x2d, 0x81, 0xff, 28),
+                chrome: Color32::from_rgb(0xf4, 0xf4, 0xf4),
+                canvas: Color32::WHITE,
+                card: Color32::from_rgb(0xf4, 0xf4, 0xf4),
+                card_border: Color32::from_rgb(0xe6, 0xe6, 0xe6),
+                raised: Color32::from_rgb(0xf0, 0xf0, 0xf0),
+                field: Color32::from_rgb(0xf4, 0xf4, 0xf4),
+                field_border: Color32::from_rgb(0x8a, 0x8a, 0x8a),
+                hover: Color32::from_rgb(0xef, 0xef, 0xef),
+                pressed: Color32::from_rgb(0xe6, 0xe6, 0xe6),
+                text: Color32::from_rgb(0x14, 0x14, 0x14),
+                text_dim: Color32::from_rgb(0x62, 0x62, 0x62),
+                text_faint: Color32::from_rgb(0x66, 0x66, 0x66),
+                icon: Color32::from_rgb(0x5a, 0x5a, 0x5a),
+                accent: Color32::from_rgb(0x0a, 0x0a, 0x0a),
+                accent_hover: Color32::from_rgb(0x2a, 0x2a, 0x2a),
+                accent_ink: Color32::from_rgb(0x14, 0x14, 0x14),
+                accent_soft: Color32::from_rgba_unmultiplied(0x14, 0x14, 0x14, 20),
                 on_accent: Color32::WHITE,
-                separator: Color32::from_rgb(0xdb, 0xda, 0xd8),
-                shadow: Color32::from_black_alpha(20),
-                danger: Color32::from_rgb(0xb3, 0x26, 0x1e),
-                warning: Color32::from_rgb(0x9a, 0x67, 0x00),
-                success: Color32::from_rgb(0x12, 0x75, 0x36),
-                code_bg: Color32::from_rgb(0xe9, 0xe8, 0xe4),
-                radius_sm: 6.0,
-                radius: 8.0,
-                radius_lg: 12.0,
+                separator: Color32::from_rgb(0xe6, 0xe6, 0xe6),
+                shadow: Color32::from_black_alpha(26),
+                danger: Color32::from_rgb(0xc2, 0x3a, 0x2b),
+                warning: Color32::from_rgb(0x93, 0x60, 0x00),
+                success: Color32::from_rgb(0x2a, 0x6e, 0x2e),
+                code_bg: Color32::from_rgb(0xf4, 0xf4, 0xf4),
+                bubble_user: Color32::from_rgb(0xe2, 0xe2, 0xe2),
+                bubble_agent: Color32::from_rgb(0xee, 0xee, 0xee),
+                composer: Color32::WHITE,
+                composer_control: Color32::from_rgb(0xe9, 0xe9, 0xe9),
+                pill_fill: Color32::from_rgb(0xf3, 0xf3, 0xf3),
+                chrome_stroke: Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 23),
+                secondary_fill: Color32::from_rgb(0xe2, 0xe2, 0xe2),
+                selected_row: Color32::from_rgb(0xe8, 0xe8, 0xe8),
+                radius_sm: 10.0,
+                radius: 12.0,
+                radius_lg: 16.0,
+                radius_xl: 22.0,
             },
         }
     }
@@ -194,6 +229,13 @@ impl Tokens {
     pub fn r_lg(&self) -> CornerRadius {
         CornerRadius::same(self.radius_lg as u8)
     }
+    pub fn r_xl(&self) -> CornerRadius {
+        CornerRadius::same(self.radius_xl as u8)
+    }
+    /// Fully round ends (pills, round buttons).
+    pub fn r_pill(&self) -> CornerRadius {
+        CornerRadius::same(u8::MAX)
+    }
 }
 
 fn tokens_id() -> egui::Id {
@@ -202,9 +244,9 @@ fn tokens_id() -> egui::Id {
 
 // ---- fonts -------------------------------------------------------------------------------------
 
-pub static DM_SANS_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/DMSans-Regular.ttf");
-pub static DM_SANS_MEDIUM: &[u8] = include_bytes!("../../../assets/fonts/DMSans-Medium.ttf");
-pub static DM_SANS_BOLD: &[u8] = include_bytes!("../../../assets/fonts/DMSans-Bold.ttf");
+pub static INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+pub static INTER_MEDIUM: &[u8] = include_bytes!("../../../assets/fonts/Inter-Medium.ttf");
+pub static INTER_SEMIBOLD: &[u8] = include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf");
 pub static JETBRAINS_MONO: &[u8] = include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
 /// A font from the optional craft-fonts build input (empty unless built with `CRAFT_FONTS_DIR`).
@@ -218,16 +260,16 @@ pub struct CraftFont {
 
 include!(concat!(env!("OUT_DIR"), "/craft_fonts.rs"));
 
-/// Install DM Sans (three weights: body, labels and bold for headings; it has no static
-/// SemiBold), JetBrains Mono (code), plus any craft-fonts as fallbacks.
+/// Install Inter (three weights: regular for text, medium for labels, semibold for headings
+/// and buttons), JetBrains Mono (code), plus any craft-fonts as fallbacks.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     let mut add = |name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
     };
-    add("DMSans", DM_SANS_REGULAR);
-    add("DMSans-Medium", DM_SANS_MEDIUM);
-    add("DMSans-Bold", DM_SANS_BOLD);
+    add("Inter", INTER_REGULAR);
+    add("Inter-Medium", INTER_MEDIUM);
+    add("Inter-SemiBold", INTER_SEMIBOLD);
     add("JetBrainsMono", JETBRAINS_MONO);
     let mut fallbacks = Vec::new();
     for f in CRAFT_FONTS {
@@ -237,13 +279,13 @@ pub fn install_fonts(ctx: &egui::Context) {
             fallbacks.push(name);
         }
     }
-    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "DMSans".to_owned());
+    fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "Inter".to_owned());
     fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "JetBrainsMono".to_owned());
     for fam in [FontFamily::Proportional, FontFamily::Monospace] {
         fonts.families.entry(fam).or_default().extend(fallbacks.iter().cloned());
     }
     let base: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
-    for (fam, primary) in [("medium", "DMSans-Medium"), ("semibold", "DMSans-Bold")] {
+    for (fam, primary) in [("medium", "Inter-Medium"), ("semibold", "Inter-SemiBold")] {
         let mut stack = vec![primary.to_owned()];
         stack.extend(base.iter().cloned());
         fonts.families.insert(FontFamily::Name(fam.into()), stack);
@@ -257,21 +299,22 @@ pub fn medium(size: f32) -> FontId {
 pub fn semibold(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("semibold".into()))
 }
-/// The type scale: every text size in the interface is one of these.
-/// Headings (`heading`, DM Sans bold), largest first: a screen's title, a step or a dialog's
+/// The type scale: every text size in the interface is one of these. It follows a calm desktop
+/// ramp (26 · 20 · 15 · 13 · 12 · 11), a half point up where text is read at length.
+/// Headings (`heading`, Inter semibold), largest first: a screen's title, a step or a dialog's
 /// title, a card's or a list item's title.
 pub const TITLE: f32 = 26.0;
-pub const SECTION: f32 = 18.0;
-pub const CARD: f32 = 16.0;
+pub const SECTION: f32 = 20.0;
+pub const CARD: f32 = 15.0;
 /// Text: the line under a title (and Simple mode's main field), reading text, secondary text
 /// and list rows, fine print (paths, counts, notes), and tags painted in tight spots.
-pub const LEAD: f32 = 17.0;
-pub const BODY: f32 = 15.0;
-pub const SMALL: f32 = 14.0;
-pub const CAPTION: f32 = 12.0;
+pub const LEAD: f32 = 15.0;
+pub const BODY: f32 = 13.5;
+pub const SMALL: f32 = 12.5;
+pub const CAPTION: f32 = 11.5;
 pub const TINY: f32 = 11.0;
 
-/// A heading: DM Sans bold, at one of the heading sizes above.
+/// A heading: Inter semibold, at one of the heading sizes above.
 pub fn heading(text: impl Into<String>, size: f32) -> egui::RichText {
     egui::RichText::new(text).font(semibold(size))
 }
@@ -292,25 +335,28 @@ pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 /// A short label (captions, buttons, the title bar) in sentence case. `size` is the old
-/// uppercase-mono size; mixed-case DM Sans needs a point and a half more to read the same.
+/// uppercase-mono size; mixed-case Inter needs a point more to read the same.
 pub fn label_text(text: &str, size: f32) -> egui::RichText {
-    egui::RichText::new(text).font(medium(size + 1.5))
+    egui::RichText::new(text).font(medium(size + 1.0))
 }
 
 /// Scroll bars that can always be seen and grabbed. egui's thin preset paints the thumb in the
 /// button fill and its track in the field colour, which here are the same, and narrows it to 2 px
 /// at rest, so it showed only on hover. The thumb is the text colour, see-through enough to stay
-/// quiet but 3:1 against the surfaces it sits on (WCAG 1.4.11), 6 px at rest and 10 px on hover.
+/// quiet but 3:1 against the surfaces it sits on (WCAG 1.4.11), a thin 6 px capsule floating
+/// over the content at rest and 9 px under the pointer, with no track until it's grabbed.
 pub fn scroll_style() -> egui::style::ScrollStyle {
     egui::style::ScrollStyle {
         floating: true,
-        bar_width: 10.0,
+        bar_width: 9.0,
         floating_width: 6.0,
-        floating_allocated_width: 8.0,
+        floating_allocated_width: 0.0,
+        bar_inner_margin: 3.0,
+        bar_outer_margin: 2.0,
         foreground_color: true,
         dormant_background_opacity: 0.0,
-        active_background_opacity: 0.5,
-        interact_background_opacity: 0.8,
+        active_background_opacity: 0.0,
+        interact_background_opacity: 0.25,
         dormant_handle_opacity: SCROLL_THUMB_AT_REST,
         active_handle_opacity: 0.65,
         interact_handle_opacity: 0.85,
@@ -321,6 +367,12 @@ pub fn scroll_style() -> egui::style::ScrollStyle {
 /// How opaque a scroll bar's thumb is at rest (over the text colour).
 const SCROLL_THUMB_AT_REST: f32 = 0.5;
 
+/// `t.text` at `alpha` (0..1): the see-through tints hover, press and grouping use, so they
+/// read the same on any surface.
+fn text_tint(t: &Tokens, alpha: f32) -> Color32 {
+    Color32::from_rgba_unmultiplied(t.text.r(), t.text.g(), t.text.b(), (alpha.clamp(0.0, 1.0) * 255.0).round() as u8)
+}
+
 /// Apply a theme. `roomy` = Beginner mode (bigger type, more air).
 pub fn apply(ctx: &egui::Context, kind: ThemeKind, roomy: bool) {
     let t = Tokens::for_kind(kind);
@@ -328,8 +380,10 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind, roomy: bool) {
     ctx.set_theme(if t.dark() { egui::Theme::Dark } else { egui::Theme::Light });
     let mut v = if t.dark() { Visuals::dark() } else { Visuals::light() };
     v.panel_fill = t.chrome;
-    v.window_fill = t.card;
-    v.window_stroke = Stroke::new(1.0, t.card_border);
+    // Dialogs, menus and popups float: a step above the cards in the dark theme (white in the
+    // light one), a faint inner outline instead of a border, and a soft wide shadow.
+    v.window_fill = if t.dark() { mix(t.card, t.raised, 0.5) } else { t.canvas };
+    v.window_stroke = Stroke::new(1.0, text_tint(&t, if t.dark() { 0.12 } else { 0.10 }));
     v.extreme_bg_color = t.field;
     v.faint_bg_color = t.raised;
     v.code_bg_color = t.code_bg;
@@ -337,54 +391,58 @@ pub fn apply(ctx: &egui::Context, kind: ThemeKind, roomy: bool) {
     v.hyperlink_color = t.accent_ink;
     v.warn_fg_color = t.warning;
     v.error_fg_color = t.danger;
-    v.window_corner_radius = t.r_lg();
-    v.menu_corner_radius = t.r();
-    v.window_shadow = egui::Shadow { offset: [0, 10], blur: 28, spread: 0, color: t.shadow };
-    v.popup_shadow = egui::Shadow { offset: [0, 4], blur: 14, spread: 0, color: t.shadow };
+    v.window_corner_radius = t.r_xl();
+    v.menu_corner_radius = t.r_lg();
+    v.window_shadow = egui::Shadow { offset: [0, 12], blur: 60, spread: 0, color: t.shadow };
+    v.popup_shadow = egui::Shadow { offset: [0, 8], blur: 40, spread: 0, color: t.shadow };
     v.text_edit_bg_color = Some(t.field);
-    v.selection.bg_fill = t.accent_soft;
-    v.selection.stroke = Stroke::new(1.0, t.accent);
+    // Selected text is a grey wash; a focused field gets a 2 px ring in the secondary grey.
+    v.selection.bg_fill = text_tint(&t, 0.20);
+    v.selection.stroke = Stroke::new(2.0, t.text_dim);
     v.handle_shape = egui::style::HandleShape::Circle;
     v.striped = false;
     v.indent_has_left_vline = false;
-    let r = t.r_sm();
+    v.slider_trailing_fill = true;
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = t.card;
     w.noninteractive.weak_bg_fill = t.card;
     w.noninteractive.bg_stroke = Stroke::new(1.0, t.separator);
     w.noninteractive.fg_stroke = Stroke::new(1.0, t.text_dim);
-    w.noninteractive.corner_radius = r;
-    // Buttons and combo boxes are hairline boxes on the surface (weak fill transparent at rest).
-    for (wv, bg, weak, stroke) in [
-        (&mut w.inactive, t.field, Color32::TRANSPARENT, t.field_border),
-        (&mut w.hovered, t.hover, t.hover, t.text_faint),
-        (&mut w.active, t.pressed, t.pressed, t.accent),
-        (&mut w.open, t.hover, t.hover, t.field_border),
+    w.noninteractive.corner_radius = t.r();
+    // Buttons and combo boxes are soft grey capsules with no outline: feedback is the tint
+    // getting stronger (hover, press), never a border. `bg_fill` is for solid parts (a slider's
+    // rail, a check box), in the secondary grey.
+    for (wv, weak, bg) in [
+        (&mut w.inactive, text_tint(&t, 0.08), t.secondary_fill),
+        (&mut w.hovered, text_tint(&t, 0.13), mix(t.secondary_fill, t.text, 0.08)),
+        (&mut w.active, text_tint(&t, 0.18), mix(t.secondary_fill, t.text, 0.14)),
+        (&mut w.open, text_tint(&t, 0.13), mix(t.secondary_fill, t.text, 0.08)),
     ] {
         wv.bg_fill = bg;
         wv.weak_bg_fill = weak;
-        wv.bg_stroke = Stroke::new(1.0, stroke);
-        wv.fg_stroke = Stroke::new(1.0, t.text);
-        wv.corner_radius = r;
+        wv.bg_stroke = Stroke::NONE;
+        wv.fg_stroke = Stroke::new(1.5, t.text);
+        wv.corner_radius = t.r();
         wv.expansion = 0.0;
     }
     ctx.set_visuals(v);
-    // Simple mode is for anyone, including people who find small text hard to read.
-    let body = if roomy { 16.0 } else { 13.0 };
+    // Simple mode is for anyone, including people who find small text hard to read: a step up
+    // the ramp everywhere and more air.
+    let body = if roomy { 15.0 } else { 13.0 };
     ctx.global_style_mut(|s| {
         s.text_styles = [
-            (TextStyle::Small, FontId::proportional(if roomy { 13.5 } else { 11.0 })),
+            (TextStyle::Small, FontId::proportional(if roomy { 12.5 } else { 11.0 })),
             (TextStyle::Body, FontId::proportional(body)),
-            (TextStyle::Button, FontId::proportional(body)),
-            (TextStyle::Heading, semibold(if roomy { SECTION } else { CARD })),
+            (TextStyle::Button, medium(if roomy { 14.0 } else { 13.0 })),
+            (TextStyle::Heading, semibold(if roomy { SECTION } else { 17.0 })),
             (TextStyle::Monospace, FontId::monospace(if roomy { 13.5 } else { 12.5 })),
         ]
         .into();
-        s.spacing.item_spacing = if roomy { egui::vec2(10.0, 8.0) } else { egui::vec2(8.0, 5.0) };
-        s.spacing.button_padding = if roomy { egui::vec2(12.0, 6.0) } else { egui::vec2(9.0, 4.0) };
-        s.spacing.interact_size = egui::vec2(24.0, if roomy { 28.0 } else { 24.0 });
+        s.spacing.item_spacing = if roomy { egui::vec2(10.0, 8.0) } else { egui::vec2(8.0, 6.0) };
+        s.spacing.button_padding = if roomy { egui::vec2(14.0, 7.0) } else { egui::vec2(12.0, 5.0) };
+        s.spacing.interact_size = egui::vec2(24.0, if roomy { 30.0 } else { 26.0 });
         s.spacing.menu_margin = egui::Margin::same(6);
-        s.spacing.window_margin = egui::Margin::same(18);
+        s.spacing.window_margin = egui::Margin::same(20);
         s.spacing.icon_width = 14.0;
         s.spacing.scroll = scroll_style();
         s.spacing.tooltip_width = 320.0;
@@ -406,7 +464,7 @@ mod tests {
     }
 
     /// Releases are built with craft-fonts (#19), and so is CI; a build without them has only
-    /// DM Sans, and shows other scripts as boxes.
+    /// Inter, and shows other scripts as boxes.
     #[test]
     fn with_craft_fonts_every_script_people_type_shows() {
         if CRAFT_FONTS.is_empty() {
@@ -488,7 +546,6 @@ mod tests {
             assert!(contrast(t.field_border, t.canvas) >= 3.0, "{k:?} control borders: {:.2}", contrast(t.field_border, t.canvas));
             // Main buttons are ink-filled with the canvas colour as their label.
             assert!(contrast(t.canvas, t.text) >= 4.5, "{k:?} main buttons");
-            assert_eq!(t.accent, BRAND);
         }
     }
 

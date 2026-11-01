@@ -36,17 +36,20 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
             ui.add_space(pad);
             ui.vertical(|ui| {
                 ui.set_width(w);
-                ui.label(theme::heading(tr("Game files"), theme::TITLE));
-                ui.add_space(4.0);
+                ui.label(theme::heading(tr("Game files"), crate::make::HEADLINE));
+                ui.add_space(8.0);
                 ui.label(
                     RichText::new(tr("See what a game packs and save its pictures as PNG files. Only for games you made, or whose owner lets you."))
-                        .size(theme::BODY)
+                        .size(theme::SMALL)
                         .color(t.text_dim),
                 );
-                ui.add_space(18.0);
+                ui.add_space(24.0);
                 // Every look at a game's files reads them, which Clean room never does.
                 if !app.settings.deep_mode {
-                    crate::engine_ui::deep_needed(app, ui);
+                    crate::make::soft_card(&t).show(ui, |ui| {
+                        ui.set_width(w - 40.0);
+                        crate::engine_ui::deep_needed(app, ui);
+                    });
                     return;
                 }
                 ui.horizontal(|ui| {
@@ -59,7 +62,7 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
                         ui.label(RichText::new(folder.display().to_string()).color(t.text_faint).size(theme::CAPTION));
                     }
                 });
-                ui.add_space(18.0);
+                ui.add_space(22.0);
                 about(app, ui, w);
                 archives(app, ui, w);
                 contents(app, ui);
@@ -79,33 +82,38 @@ fn about(app: &mut CraftApp, ui: &mut Ui, w: f32) {
     }
     let found = &g["found"];
     let mut ask = false;
-    widgets::card(&t).show(ui, |ui| {
-        ui.set_width(w - 34.0);
+    crate::make::soft_card(&t).show(ui, |ui| {
+        ui.set_width(w - 40.0);
         ui.horizontal(|ui| {
-            icons::show(ui, "puzzle", 20.0, t.accent_ink);
-            ui.label(theme::heading(g["engine"].as_str().unwrap_or_default(), theme::CARD));
+            ui.spacing_mut().item_spacing.x = 12.0;
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(36.0), Sense::hover());
+            ui.painter().circle_filled(rect.center(), 18.0, crate::make::tint(&t, 0.08));
+            icons::paint(ui, rect, "puzzle", 18.0, t.text);
+            ui.label(RichText::new(g["engine"].as_str().unwrap_or_default()).font(theme::medium(theme::BODY)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ask = widgets::primary_icon(ui, Some("message-square"), "Ask about this game", true).clicked();
             });
         });
         if let Some(note) = found["note"].as_str() {
             ui.add_space(4.0);
-            ui.label(RichText::new(note).color(t.text_dim).size(theme::BODY));
+            ui.label(RichText::new(note).color(t.text_dim).size(theme::SMALL));
         }
         let stack = g["stack"].as_array().cloned().unwrap_or_default();
         if !stack.is_empty() {
             ui.add_space(10.0);
-            widgets::caption(ui, "Built with");
+            crate::make::section(ui, "Built with");
+            ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 for s in &stack {
-                    widgets::pill(ui, s["name"].as_str().unwrap_or_default(), t.text, t.raised).on_hover_text(s["what"].as_str().unwrap_or_default());
+                    widgets::pill(ui, s["name"].as_str().unwrap_or_default(), t.text, crate::make::tint(&t, 0.08))
+                        .on_hover_text(s["what"].as_str().unwrap_or_default());
                 }
             });
         }
         let own = g["other_groups"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>();
         if !own.is_empty() {
             ui.add_space(10.0);
-            widgets::caption(ui, "Its own code");
+            crate::make::section(ui, "Its own code");
             ui.label(RichText::new(own.join(", ")).color(t.text_dim).size(theme::SMALL));
         }
         ui.add_space(10.0);
@@ -137,24 +145,23 @@ fn archives(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         widgets::empty_state(ui, "package", "No game files here", "No Unreal or Unity archives were found. Pick the folder the game is installed in.");
         return;
     }
-    widgets::caption(ui, "Archives");
-    ui.add_space(6.0);
+    crate::make::section(ui, "Archives");
+    ui.add_space(10.0);
     let mut open = None;
     for a in &g.archives {
         let (path, kind) = (a["path"].as_str().unwrap_or_default(), a["kind"].as_str().unwrap_or_default());
         let (label, icon, _) = kind_label(kind);
         let selected = g.open.as_deref() == Some(path);
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 44.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 48.0), Sense::click());
+        let h = widgets::hover_t(ui, &resp);
         let fill = if selected {
-            t.accent_soft
-        } else if resp.hovered() {
-            t.raised
+            crate::make::tint(&t, 0.11)
         } else {
-            t.card
+            crate::make::tint(&t, crate::make::CARD_TINT + (crate::make::CARD_HOVER_TINT - crate::make::CARD_TINT) * h)
         };
-        ui.painter().rect_filled(rect, t.radius, fill);
+        ui.painter().rect_filled(rect, t.r(), fill);
         let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + 24.0, rect.center().y), Vec2::splat(20.0));
-        icons::paint(ui, icon_rect, icon, 18.0, if selected { t.accent_ink } else { t.text_dim });
+        icons::paint(ui, icon_rect, icon, 17.0, if selected { t.text } else { t.text_dim });
         let name = a["name"].as_str().unwrap_or(path);
         ui.painter().text(egui::pos2(rect.left() + 46.0, rect.center().y), egui::Align2::LEFT_CENTER, name, theme::medium(theme::SMALL), t.text);
         let detail = format!("{} · {}", tr(label), crate::human_bytes(a["size"].as_u64().unwrap_or(0) as usize));
@@ -168,7 +175,7 @@ fn archives(app: &mut CraftApp, ui: &mut Ui, w: f32) {
         if widgets::named(resp, name).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             open = Some((path.to_string(), kind.to_string()));
         }
-        ui.add_space(4.0);
+        ui.add_space(6.0);
     }
     if let Some((path, kind)) = open {
         open_archive(app, path, kind);
@@ -197,10 +204,10 @@ fn contents(app: &mut CraftApp, ui: &mut Ui) {
     let g = &app.state.game;
     let Some(open) = g.open.clone() else { return };
     let (_, _, saves) = kind_label(&g.open_kind);
-    ui.add_space(18.0);
+    ui.add_space(26.0);
     let name = std::path::Path::new(&open).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    ui.label(theme::heading(format!("{} {name}", tr("Inside")), theme::SECTION));
-    ui.add_space(6.0);
+    ui.label(theme::heading(format!("{} {name}", tr("Inside")), crate::home::DIALOG_TITLE));
+    ui.add_space(10.0);
     if g.loading {
         widgets::working(ui, "Reading what's inside…", None);
         return;
@@ -213,10 +220,10 @@ fn contents(app: &mut CraftApp, ui: &mut Ui) {
         egui::TextEdit::singleline(&mut app.state.game.filter)
             .hint_text(tr("Filter by name"))
             .desired_width(320.0)
-            .frame(widgets::text_field_frame_compact(&t)),
+            .frame(widgets::text_field_frame_compact(&t).corner_radius(t.r_pill()).inner_margin(egui::Margin::symmetric(14, 7))),
     );
     widgets::named(r, "Filter the files");
-    ui.add_space(8.0);
+    ui.add_space(12.0);
     let needle = app.state.game.filter.trim().to_lowercase();
     let rows: Vec<Value> =
         app.state.game.rows.iter().filter(|r| needle.is_empty() || row_name(r).to_lowercase().contains(&needle)).take(SHOWN).cloned().collect();
@@ -225,18 +232,32 @@ fn contents(app: &mut CraftApp, ui: &mut Ui) {
         return;
     }
     let mut save = None;
-    for r in &rows {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(row_name(r)).size(theme::SMALL));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if saves && widgets::secondary(ui, Some("download"), "Save picture").clicked() {
-                    save = Some(r.clone());
-                }
-                ui.label(RichText::new(row_detail(r)).color(t.text_faint).size(theme::CAPTION));
+    // One quiet list: rows split by hairlines inset 16.
+    crate::make::soft_card(&t).inner_margin(egui::Margin::symmetric(0, 4)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (i, r) in rows.iter().enumerate() {
+            if i > 0 {
+                let y = ui.cursor().top();
+                let x = ui.max_rect().x_range();
+                ui.painter().hline((x.min + 16.0)..=x.max, y, egui::Stroke::new(1.0 / ui.ctx().pixels_per_point(), crate::make::tint(&t, 0.09)));
+            }
+            egui::Frame::new().inner_margin(egui::Margin::symmetric(16, 8)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.set_min_height(30.0);
+                    ui.label(RichText::new(row_name(r)).size(theme::SMALL));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if saves && widgets::secondary(ui, Some("download"), "Save picture").clicked() {
+                            save = Some(r.clone());
+                        }
+                        ui.label(RichText::new(row_detail(r)).color(t.text_faint).size(theme::CAPTION));
+                    });
+                });
             });
-        });
-        ui.add_space(2.0);
-    }
+        }
+    });
+    ui.add_space(6.0);
     let total = app.state.game.rows.len();
     if total > rows.len() && needle.is_empty() {
         ui.label(
@@ -279,20 +300,19 @@ fn ask_to_save(app: &mut CraftApp, archive: String, item: Value) {
 /// The question asked before a game's files are unpacked.
 pub fn permission_modal(app: &mut CraftApp, ui: &mut Ui, close: &mut bool) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(52.0), Sense::hover());
-    ui.painter().rect_filled(rect, t.radius, t.accent_soft);
-    icons::paint(ui, rect, "shield-check", 26.0, t.accent_ink);
-    ui.add_space(10.0);
-    ui.label(theme::heading(tr("Do you have permission?"), theme::SECTION));
-    ui.add_space(4.0);
+    crate::home::dialog_icon(ui, "shield-check", t.text);
+    ui.add_space(14.0);
+    ui.label(theme::heading(tr("Do you have permission?"), crate::home::DIALOG_TITLE));
+    ui.add_space(6.0);
     ui.label(
         RichText::new(tr(
             "Only take pictures out of games you made, or whose owner allows it. A game's art is usually protected by copyright and by the game's licence.",
         ))
         .color(t.text_dim),
     );
-    ui.add_space(16.0);
+    ui.add_space(20.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if widgets::primary_icon(ui, Some("shield-check"), "I have permission", true).clicked() {
             app.state.game.permitted.clone_from(&app.state.game.folder);
             *close = true;

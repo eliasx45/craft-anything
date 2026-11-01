@@ -416,14 +416,14 @@ fn plan(feed: &[FeedItem]) -> Option<&[PlanStep]> {
 /// if something was left undone.
 fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::time::Instant>) {
     let done = steps.iter().filter(|s| s.status == PlanStatus::Done).count();
-    widgets::card(t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
+    chat::side_card(t).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             widgets::caption(ui, "Plan");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(b) = began {
                     ui.label(RichText::new(crate::usage::duration_words(b.elapsed())).font(theme::mono(12.0)).color(t.text_faint));
-                    ui.add(egui::Spinner::new().size(12.0).color(t.accent));
+                    ui.add(egui::Spinner::new().size(12.0).color(t.text_dim));
                     ui.ctx().request_repaint_after(std::time::Duration::from_secs(1));
                 }
                 ui.label(
@@ -433,24 +433,25 @@ fn checklist(ui: &mut Ui, steps: &[PlanStep], t: &Tokens, began: Option<std::tim
                 );
             });
         });
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         for s in steps {
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), egui::Sense::hover());
+                let c = r.center();
                 match s.status {
                     PlanStatus::Done => {
-                        ui.painter().circle_filled(r.center(), 7.0, t.success);
-                        icons::paint(ui, r.shrink(4.0), "check", 10.0, t.canvas);
+                        ui.painter().circle_filled(c, 7.5, t.text);
+                        icons::paint(ui, r.shrink(4.0), "check", 10.0, t.card);
                     }
                     PlanStatus::Doing => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.5, t.accent));
-                        ui.painter().circle_filled(r.center(), 3.0, t.accent);
+                        ui.painter().circle_stroke(c, 7.0, egui::Stroke::new(1.5, t.text));
+                        ui.painter().circle_filled(c, 3.0, t.text);
                     }
                     PlanStatus::Todo => {
-                        ui.painter().circle_stroke(r.center(), 6.5, egui::Stroke::new(1.0, t.field_border));
+                        ui.painter().circle_stroke(c, 7.0, egui::Stroke::new(1.0, chat::faint_overlay(t, 0.3)));
                     }
                 }
-                let text = RichText::new(&s.text).size(theme::BODY);
+                let text = RichText::new(&s.text).size(theme::SMALL);
                 let text = match s.status {
                     PlanStatus::Done => text.color(t.text_faint).strikethrough(),
                     PlanStatus::Doing => text.color(t.text).strong(),
@@ -600,6 +601,16 @@ fn current_step(app: &CraftApp, ws: &Workspace) -> Option<(Step, bool)> {
 /// The side panel's width, and the room the screen needs to keep it beside the feed.
 const SIDE_W: f32 = 300.0;
 const SIDE_BESIDE: f32 = 860.0;
+/// Room at the top of the feed for the floating title, which the feed scrolls under.
+const TITLE_ROOM: f32 = 54.0;
+/// The floating title's height, and the round details button's size.
+const TITLE_H: f32 = 36.0;
+const CHROME_BUTTON: f32 = 32.0;
+
+/// Whether the details panel is folded away (remembered between runs).
+fn details_folded_id() -> egui::Id {
+    egui::Id::new("project-details-folded")
+}
 
 pub fn show(app: &mut CraftApp, ui: &mut Ui) {
     let Some(ws) = app.workspace.clone() else {
@@ -610,43 +621,62 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
     app.usage.entry(ws.root.clone()).or_insert_with(|| crate::usage::ProjectClock::load(&ws.root));
     let t = Tokens::get(ui.ctx());
     // The project's details sit on the right, where there's room for them beside a readable
-    // feed; in a narrow window they fold into the top of the feed instead.
-    let beside = ui.available_width() >= SIDE_BESIDE;
+    // feed (and the person hasn't folded them away); in a narrow window they fold into the top
+    // of the feed instead.
+    let room = ui.available_width() >= SIDE_BESIDE;
+    let folded = ui.data_mut(|d| *d.get_persisted_mut_or(details_folded_id(), false));
+    let beside = room && !folded;
     if beside {
         egui::Panel::right("project-side")
             .exact_size(SIDE_W)
             .resizable(false)
-            .frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin::same(20)))
+            .frame(egui::Frame::new().fill(t.canvas).inner_margin(Margin { left: 4, right: 16, top: 56, bottom: 16 }))
             .show(ui, |ui| egui::ScrollArea::vertical().show(ui, |ui| side(app, ui, &ws)));
     }
     egui::CentralPanel::default().frame(egui::Frame::new().fill(t.canvas).inner_margin(chat::PANE_MARGIN)).show(ui, |ui| {
         let width = ui.available_width();
-        let max_w = width.min(720.0);
+        let max_w = width.min(chat::COLUMN_W);
         let pad = ((width - max_w) / 2.0).max(0.0);
         // The feed gets what the prompt box leaves; the box grows with its text, so its height
         // is measured each frame and used on the next.
         let comp_id = ui.id().with("project-composer-h");
         let comp_h = ui.data(|d| d.get_temp::<f32>(comp_id)).unwrap_or(110.0);
         let rest = Vec2::new(width, (ui.available_height() - comp_h - chat::COMPOSER_GAP).max(40.0));
-        ui.allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
-            ui.set_min_height(rest.y);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_space(pad);
-                    ui.vertical(|ui| {
-                        ui.set_width(max_w);
-                        if !beside {
-                            egui::CollapsingHeader::new(RichText::new(tr("Project details")).font(theme::semibold(theme::BODY)))
-                                .id_salt("project-details")
-                                .icon(widgets::disclosure_icon)
-                                .show(ui, |ui| side(app, ui, &ws));
-                            ui.add_space(chat::MESSAGE_GAP);
-                        }
-                        feed(app, ui, &ws);
+        let area = ui
+            .allocate_ui_with_layout(rest, egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_min_height(rest.y);
+                egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(true).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space(pad);
+                        ui.vertical(|ui| {
+                            ui.set_width(max_w);
+                            ui.add_space(TITLE_ROOM);
+                            if !room {
+                                egui::CollapsingHeader::new(RichText::new(tr("Project details")).font(theme::semibold(theme::BODY)))
+                                    .id_salt("project-details")
+                                    .icon(widgets::disclosure_icon)
+                                    .show(ui, |ui| side(app, ui, &ws));
+                                ui.add_space(chat::MESSAGE_GAP);
+                            }
+                            feed(app, ui, &ws);
+                            ui.add_space(chat::BOTTOM_FADE / 2.0);
+                        });
                     });
                 });
-            });
-        });
+            })
+            .response
+            .rect;
+        // The feed melts into the page under the title and above the prompt box.
+        let top = ui.max_rect().top() - f32::from(chat::PANE_MARGIN.top);
+        let header = egui::Rect::from_x_y_ranges(area.x_range(), top..=area.top() + TITLE_ROOM + 6.0);
+        // Solid behind the title, then fading out just under it.
+        let hold = (area.top() + TITLE_H - 6.0 - top) / header.height().max(1.0);
+        chat::fade(ui.painter(), header, t.canvas, true, hold);
+        chat::fade(ui.painter(), egui::Rect::from_x_y_ranges(area.x_range(), (area.bottom() - chat::BOTTOM_FADE)..=area.bottom()), t.canvas, false, 0.0);
+        title_pill(ui, &ws, area, &t);
+        if room {
+            details_button(ui, area, folded);
+        }
         ui.add_space(chat::COMPOSER_GAP);
         let r = ui.horizontal(|ui| {
             ui.add_space(pad);
@@ -656,16 +686,46 @@ pub fn show(app: &mut CraftApp, ui: &mut Ui) {
     });
 }
 
+/// The project's name in a small floating pill, centred over the top of the feed.
+fn title_pill(ui: &mut Ui, ws: &Workspace, area: egui::Rect, t: &Tokens) {
+    let m = &ws.manifest;
+    let (avatar, gap, left, right) = (22.0, 7.0, 7.0, 14.0);
+    let most = (area.width() * 0.6 - avatar - gap - left - right).max(40.0);
+    let mut job = egui::text::LayoutJob::simple_singleline(m.name.clone(), theme::medium(theme::SMALL), t.text);
+    job.wrap = egui::text::TextWrapping { max_width: most, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+    let name = ui.painter().layout_job(job);
+    let w = left + avatar + gap + name.size().x + right;
+    let pill = egui::Rect::from_min_size(egui::pos2(area.center().x - w / 2.0, area.top()), Vec2::new(w, TITLE_H));
+    let p = ui.painter();
+    let shadow = egui::Shadow { offset: [0, 4], blur: 24, spread: 0, color: egui::Color32::from_black_alpha(if t.dark() { 90 } else { 22 }) };
+    p.add(shadow.as_shape(pill, t.r_pill()));
+    p.rect_filled(pill, t.r_pill(), t.pill_fill);
+    let disc = egui::Rect::from_center_size(egui::pos2(pill.left() + left + avatar / 2.0, pill.center().y), Vec2::splat(avatar));
+    p.circle_filled(disc.center(), avatar / 2.0, t.secondary_fill);
+    icons::paint(ui, disc, make::project_icon(m), 13.0, t.text);
+    let at = egui::pos2(disc.right() + gap, pill.center().y - name.size().y / 2.0);
+    ui.painter().galley(at, name, t.text);
+}
+
+/// The round « / » at the top right that folds the details panel away and brings it back.
+fn details_button(ui: &mut Ui, area: egui::Rect, folded: bool) {
+    let r = egui::Rect::from_min_size(egui::pos2(area.right() - CHROME_BUTTON, area.top() + (TITLE_H - CHROME_BUTTON) / 2.0), Vec2::splat(CHROME_BUTTON));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r).layout(egui::Layout::left_to_right(egui::Align::Min)));
+    let (glyph, name) = if folded { (chat::Glyph::Chevrons(true), "Show project details") } else { (chat::Glyph::Chevrons(false), "Hide project details") };
+    if chat::round_button(&mut child, CHROME_BUTTON, chat::Round::Ringed, glyph, name).clicked() {
+        ui.data_mut(|d| d.insert_persisted(details_folded_id(), !folded));
+    }
+}
+
 fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     let t = Tokens::get(ui.ctx());
-    ui.add_space(10.0);
     let m = &ws.manifest;
-    widgets::card(&t).show(ui, |ui| {
+    chat::side_card(&t).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, t.radius, t.accent_soft);
-            icons::paint(ui, rect, make::project_icon(m), 24.0, t.accent_ink);
+            let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 22.0, t.secondary_fill);
+            icons::paint(ui, rect, make::project_icon(m), 20.0, t.text);
             ui.vertical(|ui| {
                 ui.add(egui::Label::new(theme::heading(&m.name, theme::CARD)).truncate());
                 let (label, fg, bg) = make::status_shown(app, ws, &t);
@@ -683,9 +743,9 @@ fn side(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
             ui.label(RichText::new(&m.stack).color(t.text_dim));
         }
     });
-    ui.add_space(14.0);
+    ui.add_space(10.0);
     steps(app, ui, ws);
-    ui.add_space(14.0);
+    ui.add_space(10.0);
     open_questions(app, ui);
     asset_line(app, ui, ws);
     if outcome(app).is_some() {
@@ -768,7 +828,7 @@ fn open_questions(app: &CraftApp, ui: &mut Ui) {
         return;
     }
     let t = Tokens::get(ui.ctx());
-    widgets::card(&t).inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
+    chat::side_card(&t).inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::caption(ui, "Open questions");
         ui.add_space(6.0);
@@ -786,7 +846,7 @@ fn open_questions(app: &CraftApp, ui: &mut Ui) {
         ui.add_space(4.0);
         ui.label(RichText::new(tr("Answer any of them in a message below.")).size(theme::SMALL).color(t.text_dim));
     });
-    ui.add_space(14.0);
+    ui.add_space(10.0);
 }
 
 fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
@@ -794,7 +854,7 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
     let current = current_step(app, ws);
     let live = current.is_some_and(|(_, live)| live);
     let idx = current.and_then(|(c, _)| Step::ALL.iter().position(|s| *s == c));
-    widgets::card(&t).inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
+    chat::side_card(&t).inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::caption(ui, "Progress");
         ui.add_space(8.0);
@@ -811,34 +871,32 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
             // The line to the next step: ink once this step is done, a hairline before that.
             if i + 1 < Step::ALL.len() {
                 let x = marker.center().x;
-                let col = if done { t.text_dim } else { t.separator };
+                let col = if done { t.text_faint } else { chat::faint_overlay(&t, 0.12) };
                 ui.painter().vline(x, marker.bottom()..=row.bottom() + 12.0, egui::Stroke::new(1.0, col));
             }
-            let number = format!("{:02}", i + 1);
+            let number = format!("{}", i + 1);
+            let c = marker.center();
             let round = marker.width() / 2.0;
+            // Monochrome: done steps are filled discs with a check, the current one a filled
+            // disc with its number, the rest quiet rings.
             if done {
-                ui.painter().rect_filled(marker, round, t.text);
-                icons::paint(ui, marker.shrink(5.0), "check", 14.0, t.canvas);
+                ui.painter().circle_filled(c, round, t.text);
+                icons::paint(ui, marker.shrink(5.0), "check", 13.0, t.card);
             } else if now {
-                ui.painter().rect_filled(marker, round, t.accent);
+                ui.painter().circle_filled(c, round, t.accent);
                 let g = widgets::label_galley(ui, &number, 11.0, t.on_accent);
-                ui.painter().galley_with_override_text_color(marker.center() - g.size() / 2.0, g, t.on_accent);
+                ui.painter().galley_with_override_text_color(c - g.size() / 2.0, g, t.on_accent);
                 let pulse = (ui.input(|i| i.time) as f32 * 2.5).sin().abs();
-                ui.painter().rect_stroke(
-                    marker.expand(2.0 + pulse * 3.0),
-                    round + 2.0 + pulse * 3.0,
-                    egui::Stroke::new(1.0, t.accent.gamma_multiply(0.6 - pulse * 0.4)),
-                    egui::StrokeKind::Outside,
-                );
+                ui.painter().circle_stroke(c, round + 2.0 + pulse * 3.0, egui::Stroke::new(1.0, t.accent.gamma_multiply(0.6 - pulse * 0.4)));
                 widgets::animate(ui, widgets::FRAME);
             } else if here {
-                ui.painter().rect(marker, round, t.card, egui::Stroke::new(1.5, t.accent), egui::StrokeKind::Inside);
-                let g = widgets::label_galley(ui, &number, 11.0, t.accent_ink);
-                ui.painter().galley_with_override_text_color(marker.center() - g.size() / 2.0, g, t.accent_ink);
+                ui.painter().circle_stroke(c, round - 0.75, egui::Stroke::new(1.5, t.text));
+                let g = widgets::label_galley(ui, &number, 11.0, t.text);
+                ui.painter().galley_with_override_text_color(c - g.size() / 2.0, g, t.text);
             } else {
-                ui.painter().rect(marker, round, t.card, egui::Stroke::new(1.0, t.field_border), egui::StrokeKind::Inside);
+                ui.painter().circle_stroke(c, round - 0.5, egui::Stroke::new(1.0, chat::faint_overlay(&t, 0.25)));
                 let g = widgets::label_galley(ui, &number, 11.0, t.text_faint);
-                ui.painter().galley_with_override_text_color(marker.center() - g.size() / 2.0, g, t.text_faint);
+                ui.painter().galley_with_override_text_color(c - g.size() / 2.0, g, t.text_faint);
             }
             let x = marker.right() + 12.0;
             let (font, col) = if now || here {
@@ -863,7 +921,7 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
             let name = if state.is_empty() { tr(s.label()) } else { format!("{}: {state}", tr(s.label())) };
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
             if !state.is_empty() {
-                let ink = if now || here { t.accent_ink } else { t.text_faint };
+                let ink = if now || here { t.text } else { t.text_faint };
                 let g = widgets::label_galley(ui, &state, theme::CAPTION, ink);
                 let pos = egui::pos2(row.right() - g.size().x, row.center().y - g.size().y / 2.0);
                 ui.painter().galley_with_override_text_color(pos, g, ink);
@@ -893,7 +951,7 @@ fn steps(app: &CraftApp, ui: &mut Ui, ws: &Workspace) {
             ui.add_space(14.0);
             stat_row(ui, "Likeness", &format!("{sim:.0}%"));
             let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 4.0), egui::Sense::hover());
-            ui.painter().rect_filled(bar, 2.0, t.separator);
+            ui.painter().rect_filled(bar, 2.0, chat::faint_overlay(&t, 0.12));
             let filled = egui::Rect::from_min_size(bar.min, Vec2::new(bar.width() * (sim / 100.0).clamp(0.0, 1.0) as f32, bar.height()));
             ui.painter().rect_filled(filled, 2.0, t.accent);
         }
@@ -931,20 +989,20 @@ fn feed(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
     // The finish line: a big, plain prompt to try what was made.
     if !app.running() && matches!(ws.manifest.status, Status::Ready) && outcome(app).is_some() {
         let w = outcome_words(&app.kinds, ws);
-        widgets::card(&t).inner_margin(Margin::same(18)).show(ui, |ui| {
+        chat::notice(&t, None).inner_margin(Margin::same(16)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, t.radius, t.accent_soft);
-                icons::paint(ui, rect, w.icon, 22.0, t.accent_ink);
+                ui.painter().circle_filled(rect.center(), 22.0, t.secondary_fill);
+                icons::paint(ui, rect, w.icon, 20.0, t.text);
                 ui.vertical(|ui| {
                     ui.label(theme::heading(tr(w.ready), theme::CARD));
                     ui.label(RichText::new(tr("Try it out, then ask below for any changes.")).color(t.text_dim));
                 });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| outcome_button(app, ui, ws, 44.0, 13.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| outcome_button(app, ui, ws, 40.0, 13.0));
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(chat::NEW_SPEAKER_GAP);
     }
     let items = &app.state.feed;
     // With a plan pinned below, it shows the work and the clock; one progress display, not two.
@@ -1100,44 +1158,51 @@ fn draw_items(
             next_asked += 1;
         }
     };
+    // When it began, centred and faint above the first message.
+    if !items.is_empty() && ws.manifest.created_ms > 0 {
+        chat::timestamp(ui, &trf("Started {when}", &[("when", &make::ago(ws.manifest.created_ms))]));
+    }
+    // The gaps between items are set here (closer within one side's run, wider where the
+    // speaker changes or a card comes); what's inside each keeps the usual spacing.
+    let spacing = ui.spacing().item_spacing;
+    let mut last: Option<Side> = None;
     for (i, item) in items.iter().enumerate() {
         questions_up_to(app, ui, i);
-        ui.push_id(i, |ui| match item {
-            FeedItem::User(text) => chat::user_bubble(ui, text, false),
-            FeedItem::Step { text, .. } => chat::activity_row(ui, RichText::new(text).color(t.text_dim).size(theme::SMALL)),
-            FeedItem::Paused => chat::activity_row(ui, RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
-            FeedItem::Agent { text, streaming } => {
-                chat::bubble(&t, false, false).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    chat::rich_text(ui, text.trim(), !advanced);
-                    if *streaming {
-                        widgets::thinking(ui);
-                    }
-                });
-            }
-            // Tool-by-tool work is for Advanced mode; Simple mode shows the plain-words story.
-            FeedItem::Work { tools, notes } if advanced => work(ui, tools, notes, advanced, &t),
-            FeedItem::Work { .. } => {}
-            // Pinned above the prompt box instead (see `checklist`).
-            FeedItem::Plan(_) => {}
-            FeedItem::Ask { request, answer } => {
-                if let Some(a) = ask_card(app, ui, request, answer.as_deref()) {
-                    answers.push(a);
+        let Some(side) = side_of(item, advanced) else { continue };
+        ui.spacing_mut().item_spacing.y = 0.0;
+        if let Some(prev) = last {
+            ui.add_space(if prev == side && side != Side::Card { chat::SAME_SPEAKER_GAP } else { chat::NEW_SPEAKER_GAP });
+        }
+        last = Some(side);
+        ui.push_id(i, |ui| {
+            ui.spacing_mut().item_spacing = spacing;
+            match item {
+                FeedItem::User(text) => chat::user_bubble(ui, text, false),
+                FeedItem::Step { text, .. } => chat::activity_row(ui, "activity", RichText::new(text).color(t.text_dim).size(theme::SMALL)),
+                FeedItem::Paused => chat::activity_row(ui, "history", RichText::new(tr("Paused.")).color(t.text_dim).size(theme::SMALL)),
+                FeedItem::Agent { text, streaming } => {
+                    chat::agent_bubble(ui, false, |ui| {
+                        chat::rich_text(ui, text.trim(), !advanced);
+                        if *streaming {
+                            widgets::thinking(ui);
+                        }
+                    });
                 }
-            }
-            FeedItem::Check(c) => check_card(app, ui, ctx, ws, c),
-            FeedItem::Error { message, remediation, log } => {
-                egui::Frame::new()
-                    .fill(t.card)
-                    .stroke(egui::Stroke::new(1.0, t.danger.gamma_multiply(0.6)))
-                    .corner_radius(t.r_lg())
-                    .inner_margin(Margin::same(14))
-                    .show(ui, |ui| {
+                // Tool-by-tool work is for Advanced mode; Simple mode shows the plain-words story.
+                FeedItem::Work { tools, notes } if advanced => work(ui, tools, notes, advanced, &t),
+                FeedItem::Work { .. } => {}
+                // Pinned above the prompt box instead (see `checklist`).
+                FeedItem::Plan(_) => {}
+                FeedItem::Ask { request, answer } => {
+                    if let Some(a) = ask_card(app, ui, request, answer.as_deref()) {
+                        answers.push(a);
+                    }
+                }
+                FeedItem::Check(c) => check_card(app, ui, ctx, ws, c),
+                FeedItem::Error { message, remediation, log } => {
+                    chat::notice(&t, Some(t.danger)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.horizontal(|ui| {
-                            icons::show(ui, "triangle-alert", 16.0, t.danger);
-                            ui.add(egui::Label::new(RichText::new(message).color(t.text)).wrap());
-                        });
+                        chat::notice_title(ui, "triangle-alert", t.danger, message.clone());
                         if let Some(r) = remediation {
                             ui.add(egui::Label::new(RichText::new(r).color(t.text_dim)).wrap());
                         }
@@ -1163,11 +1228,34 @@ fn draw_items(
                             });
                         }
                     });
+                }
             }
         });
-        ui.add_space(chat::MESSAGE_GAP);
+        ui.spacing_mut().item_spacing = spacing;
+    }
+    if last.is_some() {
+        ui.add_space(chat::NEW_SPEAKER_GAP);
     }
     questions_up_to(app, ui, usize::MAX);
+}
+
+/// Who a feed item comes from, for the gaps between items; `None` when it draws nothing here.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Person,
+    Builder,
+    /// Questions, checks and errors: always set apart.
+    Card,
+}
+
+fn side_of(item: &FeedItem, advanced: bool) -> Option<Side> {
+    match item {
+        FeedItem::User(_) => Some(Side::Person),
+        FeedItem::Step { .. } | FeedItem::Paused | FeedItem::Agent { .. } => Some(Side::Builder),
+        FeedItem::Work { .. } => advanced.then_some(Side::Builder),
+        FeedItem::Plan(_) => None,
+        FeedItem::Ask { .. } | FeedItem::Check(_) | FeedItem::Error { .. } => Some(Side::Card),
+    }
 }
 
 fn work(ui: &mut Ui, tools: &[(String, Option<bool>)], notes: &[String], advanced: bool, t: &Tokens) {
@@ -1232,17 +1320,14 @@ fn continue_card(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
         ("Paused", "Everything so far is kept. Continue picks up where it stopped.")
     };
     let mut go = false;
-    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.5, t.accent)).corner_radius(t.r_lg()).inner_margin(Margin::same(14)).show(ui, |ui| {
+    chat::notice(&t, None).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            icons::show(ui, "history", 18.0, t.accent);
-            ui.add(egui::Label::new(RichText::new(tr(title)).font(theme::semibold(theme::BODY))).wrap());
-        });
+        chat::notice_title(ui, "history", t.text_dim, tr(title));
         ui.add(egui::Label::new(RichText::new(tr(body)).color(t.text_dim)).wrap());
         ui.add_space(6.0);
         go = widgets::primary_icon(ui, Some("play"), "Continue", true).clicked();
     });
-    ui.add_space(chat::MESSAGE_GAP);
+    ui.add_space(chat::NEW_SPEAKER_GAP);
     if go {
         app.continue_build();
     }
@@ -1251,15 +1336,13 @@ fn continue_card(app: &mut CraftApp, ui: &mut Ui, ws: &Workspace) {
 fn ask_card(app: &mut CraftApp, ui: &mut Ui, r: &Request, answered: Option<&str>) -> Option<(String, Answer, String)> {
     let t = Tokens::get(ui.ctx());
     let approval = r.kind == RequestKind::Approval;
-    let border = if approval { t.warning } else { t.accent };
+    // An approval's glyph is amber (it waits on the person); a question's is quiet.
+    let tint = if approval { t.warning } else { t.text_dim };
     let mut out = None;
-    egui::Frame::new().fill(t.card).stroke(egui::Stroke::new(1.5, border)).corner_radius(t.r_lg()).inner_margin(Margin::same(14)).show(ui, |ui| {
+    chat::notice(&t, None).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            icons::show(ui, if approval { "shield" } else { "circle-help" }, 18.0, border);
-            let title = if approval { trf("May I {action}?", &[("action", &lower_first(&r.title))]) } else { r.title.clone() };
-            ui.add(egui::Label::new(RichText::new(title).font(theme::semibold(theme::BODY))).wrap());
-        });
+        let title = if approval { trf("May I {action}?", &[("action", &lower_first(&r.title))]) } else { r.title.clone() };
+        chat::notice_title(ui, if approval { "shield" } else { "circle-help" }, tint, title);
         if !r.detail.is_empty() {
             if approval {
                 egui::CollapsingHeader::new(RichText::new(tr("Details")).color(t.text_faint).size(theme::CAPTION))
@@ -1308,12 +1391,9 @@ fn ask_card(app: &mut CraftApp, ui: &mut Ui, r: &Request, answered: Option<&str>
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let text = app.state.answers.entry(r.id.clone()).or_default();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .hint_text(tr("Or type your answer…"))
-                        .desired_width(ui.available_width() - 120.0)
-                        .frame(widgets::text_field_frame(&t)),
-                );
+                let resp = ui.add(egui::TextEdit::singleline(text).hint_text(tr("Or type your answer…")).desired_width(ui.available_width() - 120.0).frame(
+                    widgets::text_field_frame(&t).fill(t.canvas).stroke(egui::Stroke::new(1.0, chat::faint_overlay(&t, 0.12))).corner_radius(t.r_pill()),
+                ));
                 let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let ready = !text.trim().is_empty();
                 if (widgets::primary_icon(ui, Some("send"), "Send", ready).clicked() || enter) && ready {
@@ -1377,16 +1457,13 @@ fn claims_list(ui: &mut Ui, c: &CheckResult, t: &Tokens) {
 
 fn check_card(app: &mut CraftApp, ui: &mut Ui, ctx: &egui::Context, ws: &Workspace, c: &CheckResult) {
     let t = Tokens::get(ui.ctx());
-    widgets::card(&t).show(ui, |ui| {
+    chat::notice(&t, None).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            icons::show(ui, "scan-search", 18.0, t.accent_ink);
-            let title = match c.similarity {
-                Some(s) => trf("Check {n}: about {s}% like the original", &[("n", &c.round.to_string()), ("s", &format!("{s:.0}"))]),
-                None => trf("Check {n}", &[("n", &c.round.to_string())]),
-            };
-            ui.label(RichText::new(title).font(theme::semibold(theme::BODY)));
-        });
+        let title = match c.similarity {
+            Some(s) => trf("Check {n}: about {s}% like the original", &[("n", &c.round.to_string()), ("s", &format!("{s:.0}"))]),
+            None => trf("Check {n}", &[("n", &c.round.to_string())]),
+        };
+        chat::notice_title(ui, "scan-search", t.text_dim, title);
         // The per-width measurements are for Advanced mode; a failed check's reason always shows.
         if !app.beginner() || c.similarity.is_none() {
             ui.add(egui::Label::new(RichText::new(&c.note).color(t.text_dim).size(theme::CAPTION)).wrap());
@@ -1401,7 +1478,8 @@ fn check_card(app: &mut CraftApp, ui: &mut Ui, ctx: &egui::Context, ws: &Workspa
             for (i, p) in c.pages.iter().enumerate() {
                 let text = format!("{}  {:.0}%", if p.dir.is_empty() { tr("start page") } else { p.name.clone() }, p.similarity);
                 let colour = if p.similarity >= app.settings.build.good_enough { t.text_dim } else { t.warning };
-                if ui.selectable_label(i == picked, RichText::new(text).font(theme::mono(12.5)).color(colour)).clicked() {
+                if ui.add(egui::Button::selectable(i == picked, RichText::new(text).font(theme::mono(12.5)).color(colour)).corner_radius(t.r_pill())).clicked()
+                {
                     picked = i;
                     ui.data_mut(|d| d.insert_temp(picked_id, i));
                 }
@@ -1447,7 +1525,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
     }
     if let Some(n) = app.queue_position() {
         ui.horizontal(|ui| {
-            icons::show(ui, "history", 15.0, t.accent_ink);
+            icons::show(ui, "history", 15.0, t.text_dim);
             let line = if n == 1 {
                 tr("Waiting for another build to finish: this one starts next.")
             } else {
@@ -1465,7 +1543,7 @@ fn composer(app: &mut CraftApp, ui: &mut Ui, width: f32, t: &Tokens) {
         for (i, note) in waiting.iter().enumerate() {
             chat::user_bubble(ui, &note.shown, false);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icons::button(ui, "x", 22.0, false, "Take back: puts it in the box again").clicked() {
+                if chat::round_button(ui, 22.0, chat::Round::Control, chat::Glyph::Cross, "Take back: puts it in the box again").clicked() {
                     take_back = Some(note.id);
                 }
                 // Said once, under the last note.
@@ -1559,13 +1637,14 @@ fn questions_switch(app: &mut CraftApp, ui: &mut Ui) {
     let now = app.settings.questions_in(Some(&ws.manifest));
     let root = ws.root.clone();
     let t = Tokens::get(ui.ctx());
-    ui.add_space(4.0);
+    ui.add_space(2.0);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         // What sending does: ask for a change, or just ask about the build.
-        if let Some(i) = widgets::segmented(ui, &["Change it", "Just ask"], usize::from(app.state.just_ask), 24.0) {
+        if let Some(i) = chat::pill_switch(ui, &["Change it", "Just ask"], usize::from(app.state.just_ask)) {
             app.state.just_ask = i == 1;
         }
-        ui.label(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::SMALL));
+        ui.label(RichText::new(tr("or start with /btw to just ask")).color(t.text_faint).size(theme::CAPTION));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| questions_controls(app, ui, now, &root, &t));
     });
 }
@@ -1574,7 +1653,7 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
     use craft_anything_engine::workspace::Questions;
     {
         let sel = usize::from(now == Questions::Decide);
-        if let Some(i) = widgets::segmented(ui, &["Ask me", "Decide yourself"], sel, 24.0) {
+        if let Some(i) = chat::pill_switch(ui, &["Ask me", "Decide yourself"], sel) {
             let mode = if i == 0 { Questions::Ask } else { Questions::Decide };
             app.set_questions(root, mode);
         }
@@ -1583,7 +1662,7 @@ fn questions_controls(app: &mut CraftApp, ui: &mut Ui, now: craft_anything_engin
         } else {
             tr("The builder answers its own questions and says what it chose (\"I decided: …\"), so you can change it.")
         };
-        ui.label(RichText::new(tr("Builder's questions:")).color(t.text_dim).size(theme::SMALL)).on_hover_text(tip);
+        ui.label(RichText::new(tr("Builder's questions:")).color(t.text_faint).size(theme::CAPTION)).on_hover_text(tip);
     }
 }
 
@@ -1700,6 +1779,26 @@ mod tests {
         busy.join().unwrap();
         assert!(app.settings.deep_mode, "a busy engine at startup must not mean default settings");
         drop(release.0);
+    }
+
+    #[test]
+    fn the_details_panel_folds_away_and_comes_back() {
+        use egui_kittest::kittest::Queryable;
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1280.0, 820.0)).with_max_steps(32).build_eframe(|cc| {
+            CraftApp::setup_context(&cc.egui_ctx);
+            let mut a = crate::demo::app(crate::demo::engine(craft_anything_engine::Mode::Beginner, true));
+            crate::demo::fill_project(&mut a);
+            a
+        });
+        h.run_steps(3);
+        h.get_by_label("Progress");
+        h.get_by_label("Hide project details").click();
+        h.run_steps(3);
+        assert!(h.query_by_label("Progress").is_none(), "folded away");
+        h.get_by_label("Ask for a change");
+        h.get_by_label("Show project details").click();
+        h.run_steps(3);
+        h.get_by_label("Progress");
     }
 
     #[test]

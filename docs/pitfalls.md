@@ -407,6 +407,11 @@ code depends on in one constant next to the tool.
 `<area>_<object>_<action>` from the start, and had to be renamed. Read docs/tool-ids.md before
 naming a tool.
 
+**A stash popped into the wrong worktree.** Four agents worked in parallel worktrees of one
+clone; one stashed to compare with the base commit, and its `git stash pop` applied another
+agent's stash instead, because every worktree of a clone shares one stash list. Parallel agents
+never stash: commit work in progress on their own branch (or compare in a fresh worktree).
+
 **A stash that left a new file behind.** Work in progress was stashed to fix something on another
 branch; `git stash` keeps only tracked files, so a new file stayed in the tree and `git add -A`
 put it into the other PR. Use `git stash -u` (or commit the work in progress on its own branch),
